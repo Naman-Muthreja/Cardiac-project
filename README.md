@@ -1,0 +1,9 @@
+# Cardiac-project
+
+RATIONALE
+
+	Clinical problem: Hypertrophic Cardiomyopathy (HCM) and Dilated Cardiomyopathy (DCM) are prominent inherited heart diseases that severely damage cardiac function. Approximately 30% of HCM cases are caused by “poison-peptide” mutations in MYH7, which encodes the β-Myosin Heavy Chain, and haploinsufficiency in MYBPC3, which is a biological regulator of myosin-actin binding. Nonsense (premature stop) substitution mutations in TTN, which encodes the sarcomere protein Titin, are a large cause of DCM. 
+
+	Technical Gap: A current bottleneck in genomic medicine is that clinical sequencing often classifies mutations as Variants of Uncertain Significance (VUS). In addition, while deep learning models can predict pathogenicity, they act as “black boxes”, meaning that they do not give reasoning for why a prediction is made. Doctors cannot blindly trust these predictions without understanding the biological reasoning. Also, large scale studies demonstrate that “routine screening for specific mutations… cannot be designated either ‘benign’ or ‘malignant’ or reliably predict clinical outcome” (Maron et al., 2012).
+
+	Proposed Solution: To address all of these issues, I will develop an eXplainable AI framework centered on a 1D CNN trained on Single Nucleotide Variants in genomic windows. It will apply Integrated Gradients, which satisfy the Completeness, Sensitivity, and Implementation Invariance Axioms, to a 1D Convolutional Network made with PyTorch, in order to output interpretable explanations that map to known biological domains. Other popular XAI frameworks like SHAP and LIME lack axiomatic completeness, but Integrated Gradients provides axiomatic guarantees. By implementing this framework, the interpretability of pathogenicity predictions will be improved, providing a societal impact by giving cardiologists a mathematically grounded tool to improve patients outcomes and reduce VUS confusion.
