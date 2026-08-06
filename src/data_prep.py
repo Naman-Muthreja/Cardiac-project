@@ -38,6 +38,7 @@ def load_clinvar(path, verbose = False, chunksize = 200_000):
     if verbose:
         print("Columns actually used:", keep)
 
+    # Initializing an empty list later to be used as a df of filtered data
     kept_chunks = []
 
     for chunk in pd.read_csv(
@@ -76,17 +77,47 @@ def is_nonsense_snv(clinvar_name):
 def label_row(gene, clinsig, name ):
     sig = clinsig.lower()
     is_pathogenic = "pathogenic" in sig and "conflicting" not in sig
-    is_benign = "benign" in sig 
+    is_benign = "benign" in sig and "conflicting" not in sig 
     if is_pathogenic:
         if gene == "TTN":
             # We don't need to do this for MYH7, or MYBPC3, because missense mutations can be 
-            # pathogenic in those genes, but TTN missense mutations can be healthy, 
-            # so we filter TTN for only nonsense substitutions.
+            # pathogenic in those genes, but TTN missense mutations are healthy, so we
+            # filter TTN for only nonsense substitutions. If is_nonsense_snv is true, DCM is outputted
             return "DCM" if is_nonsense_snv(name) else None
+        # If pathogenic but not TTN, return what gene caused it to be pathogenic (missense mutations)
         return GENE_TO_CLASS[gene]
     if is_benign:
         return "Benign"
     return None 
 
+def fetch_sequence(chrom, pos):
+    start = pos - HALF
+    end = pos + HALF
+    # Uses the Ensembl REST API to download coordinate windows for chromosomes
+    url = (
+        f"https://rest.ensembl.org/sequence/region/human/"
+        f"{chrom}:{start}..{end}?content-type=text/plain"
+    )
+    # Stores the server's response into a variable called 'r'
+    r =  requests.get(url)
+    # If something like a 404 error comes up, return None
+    if r.status_code != 200:
+        return None
+        # Returns the ACTG string from the Ensembl REST API, formatted properly.
+    else: 
+        return r.text.strip.upper()
+# Checks the center(the mutation site) and returns the DNA strand for the model to analyze,
+# given that ENSEMBL REST API matches ClinVar
+def apply_variant(seq, ref, alt):
+    center = HALF
+    if seq[center] != ref:
+        return None 
+    else: 
+        return seq[:center] + alt + seq[center+1:] 
+    
+def build_dataset(clinvar_path, out_path):
+    df = load_clinvar(clinvar_path)
+    rows = []
+    
 
     
