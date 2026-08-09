@@ -1,4 +1,4 @@
-#imports, includes re(reguular expression lib), time(pause between API calls),
+#imports, includes re(regular expression lib), time(pause between API calls),
 #pandas for viewing data, and requests to download data
 import re
 import time
@@ -6,7 +6,7 @@ import pandas as pd
 import requests
 
 # Explicit columns actually needed(avoids RAM exhaustion)
-CLINVAR_USECOLS = [
+ClinVar_USECOLS = [
     "#AlleleID", "AlleleID", "Type", "GeneSymbol", "ClinicalSignificance",
     "Name", "Assembly", "Chromosome", "PositionVCF",
     "ReferenceAlleleVCF", "AlternateAlleleVCF", "ReviewStatus",
@@ -28,15 +28,15 @@ GENE_TO_CLASS = {
 LOW_CONFIDENCE_REVIEW = {"no assertion criteria provided", "no assertion provided"}
 
 # Filters ClinVar for the needed data, and Verbose = false means that function 
-# runs quietly in the background without unneccesary print calls(verbose = false)
+# runs quietly in the background without uneccesary print calls(verbose = false)
 # Chunksize is present because reading the whole variant_summary file in one go 
 # can cause crashes
-def load_clinvar(path, verbose = False, chunksize = 200_000):
+def load_ClinVar(path, verbose = False, chunksize = 200_000):
 
     header = pd.read_csv(path, sep = "\t", nrows = 0)
 
     # Only keeps the necessary data
-    keep = [c for c in CLINVAR_USECOLS if c in header]
+    keep = [c for c in ClinVar_USECOLS if c in header]
 
     if verbose:
         print("Columns actually used:", keep)
@@ -54,11 +54,11 @@ def load_clinvar(path, verbose = False, chunksize = 200_000):
         chunk = chunk[chunk["Type"] == "single nucleotide variant"]
         chunk = chunk[chunk["GeneSymbol"].isin(["MYH7", "MYBPC3", "TTN"])]
 
-        # If the chunk surrived, add it to the kept list
+        # If the chunk survived, add it to the kept list
         if len(chunk) > 0:
             kept_chunks.append(chunk)
 
-    # Combines all the chunks into one DataFrame, with the row numbers reset(ignore index)
+    # Combines all the chunks into one DataFrame, with the row index numbers reset(ignore index)
     if kept_chunks:
         df = pd.concat(kept_chunks, ignore_index= True)
     else:
@@ -72,10 +72,10 @@ def load_clinvar(path, verbose = False, chunksize = 200_000):
 
 
 # Returns false for a nonstring input, and detects ClinVar's stop codon notation, to search for DCM
-def is_nonsense_snv(clinvar_name):
-    if not isinstance(clinvar_name, str):
+def is_nonsense_snv(ClinVar_name):
+    if not isinstance(ClinVar_name, str):
         return False
-    return re.search(r"p\.[A-Za-z]{3}\d+Ter", clinvar_name) is not None
+    return re.search(r"p\.[A-Za-z]{3}\d+Ter", ClinVar_name) is not None
 
 # This sees whether a variant is pathogenic or benign using keywords in ClinVar, then
 # returns the appropriate name. For example, a benign variant returns benign.
@@ -101,6 +101,7 @@ def label_row(gene, clinsig, name ):
 
 def fetch_sequence(chrom, pos):
 
+    # Makes sure that the position of the variant is exactly the half way point
     start = pos - HALF
     end = pos + HALF
 
@@ -132,18 +133,18 @@ def apply_variant(seq, ref, alt):
 
 # Defines key information, like pos, chrom, ref, alt, etc, and then outputs it. It uses many
 # defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
-def build_dataset(clinvar_path, out_path):
-    df = load_clinvar(clinvar_path)
+def build_ClinVar_dataset(ClinVar_path, out_path):
+    df = load_ClinVar(ClinVar_path)
     rows = []
 
     # This for loop iterates every row (rather than column headers like normal)  using iterrows, but the _ makes it so that 
     # it so that index numbers are discarded.
     for _, row in df.iterrows():
 
-        # Calls the label_row function from earlier, and assigns the clincial significance
+        # Calls the label_row function from earlier, and assigns the clinical significance
         # (e.g. pathogenic) to "label", as a string for the model. Remember, because I'm putting the three
-        # parameters wrapped inside label_row, row["Gene Symbol"] becomes the gene parameter, 
-        # str(row(["Clinical Significance"])) becomes clinsig, and name is str(row["Name"]).
+        # parameters wrapped inside label_row, row["Gene Symbol"] becomes the gene parameter; 
+        # str(row(["Clinical Significance"]) becomes clinsig, and the name is str(row["Name"]).
         label = label_row(row["GeneSymbol"], str(row["ClinicalSignificance"]), str(row["Name"]))
 
         # If the label does not have the needed data, it goes to the next iteration, since this
@@ -181,7 +182,7 @@ def build_dataset(clinvar_path, out_path):
         if seq is None or len(seq) != WINDOW:
             continue 
 
-        
+       # Fetches the variant position, defines the mutant/the point of mutation
         mutant = apply_variant(seq, ref, alt)
 
         # Makes sure that a value is actually outputted, otherwise moves on
@@ -205,25 +206,25 @@ def build_dataset(clinvar_path, out_path):
     print(out["label"].value_counts())
     return out
 
-# Makes a function similar to build_dataset used for ClinVar data, but with benign varaiants
+# Makes a function similar to build_ClinVar_dataset used for ClinVar data, but with benign varaiants
 # from gnomAD to balance data. The faf_threshold (Filtering allele frequency) of 0.001  means
 # that the mutation is relatively common (1 in 1k), indicating benignity.
-def load_gnomad_benign(gnomad_csv_path, gene, faf_threshold  = 0.001):
+def build_gnomAD_benign(gnomAD_csv_path, gene, faf_threshold  = 0.001):
 
-    df = pd.read_csv(gnomad_csv_path)
+    df = pd.read_csv(gnomAD_csv_path)
     # If a gene passed quality control (qc) in the exome or whole genome, it is okay to move on.
     # A NaN value gets filled with an empty string.
 
-    passes_qc = (df["Filters - exomes"].fillna("").eq("PASS") | df["Filters - genomes"])
+    passes_qc = (df["Filters - exomes"].fillna("").eq("PASS") | df["Filters - genomes"].fillna("").eq("PASS"))
 
-    # Any row that does not evaluate to true doesn't move on.
+    # Only rows that evaluate "PASS" as True will move on.
     df = df[passes_qc]
 
     # If the Filtering allele frequency is greater than 0.001, keep the variant (benign needed only)
-    # Fills missing values with 0 with fillna. 
+    # Fills missing values with 0(which won't work) with fillna. 
     df = df[df["GroupMax FAF frequency"].fillna(0) > faf_threshold]
 
-    # This code is very similar to build_dataset, and is still needed, for filtering for 
+    # This code is very similar to build_ClinVar_dataset, and is still needed, for filtering for 
     # only needed data.
     rows = []
     for _, row in df.iterrows():
@@ -237,10 +238,10 @@ def load_gnomad_benign(gnomad_csv_path, gene, faf_threshold  = 0.001):
             continue
 
         # Intializes ref and alt to their respective positions
-        ref = str(row["Reference"])
-        alt = str(row["Alternate"])
+        ref = str(row["ReferenceAlleleVCF"])
+        alt = str(row["AlternateAlleleVCF"])
 
-        # Filters for only SNVs
+        # Filters for only SNVs, skips things like "CT" in one space
         VALID_BASES = {"A", "C", "G", "T"} 
         if ref not in VALID_BASES or alt not in VALID_BASES:
             continue
@@ -251,7 +252,7 @@ def load_gnomad_benign(gnomad_csv_path, gene, faf_threshold  = 0.001):
         if seq is None or len(seq) != WINDOW:
             continue
 
-        # Fetches the variant position
+        # Fetches the variant position, defines the mutant/the point of mutation
         mutant = apply_variant(seq, ref, alt)
         if mutant is None:
             continue
@@ -269,3 +270,33 @@ def load_gnomad_benign(gnomad_csv_path, gene, faf_threshold  = 0.001):
         )
     # returns the df
     return pd.DataFrame(rows)
+
+# Builds the final dataset combining both the gnomAD and ClinVar outputs.
+def build_full_dataset(ClinVar_path, gnomAD_csv_paths, out_path, faf_threshold = 0.001):
+
+    # Stores the resulting Dataframe from build_ClinVar_dataset to ClinVar_rows
+    ClinVar_rows = build_ClinVar_dataset(ClinVar_path, out_path)
+
+    # Stores the resulting DataFrame from build_gnomAD_benign to gnomAD_frames,
+    # for each of the gene-path pairs (MYH7, MYBPC3, and TTN). 
+    gnomAD_frames = [
+        build_gnomAD_benign(path, gene, faf_threshold)
+        for gene, path in gnomAD_csv_paths.items()
+    ]
+
+    # This finalizes a df for the gnomAD data, by combining data for each gene's CSV file
+    # IgnoreIndex makes sure to reindex the variants instead of keeping the old indexes.
+    # Also creates an empty df instead of crashing.
+
+    gnomAD_rows = pd.concat(gnomAD_frames, ignore_index= True ) if gnomAD_frames else pd.DataFrame()
+
+    # Merging all the data into one final df
+
+    combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
+    combined.to_csv(out_path, index = False)
+
+    # Prints how many times each label appears
+    print(f"Combined Dataset: {len(combined)} total sequences")
+    print(combined["label"].value_counts())
+
+    return combined
