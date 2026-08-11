@@ -99,7 +99,7 @@ def label_row(gene, clinsig, name ):
         return "Benign"
     return None 
 
-def fetch_sequence(chrom, pos):
+def fetch_sequence(chrom, pos, timeout=15, max_retries=3):
 
     # Makes sure that the position of the variant is exactly the half way point
     start = pos - HALF
@@ -111,10 +111,23 @@ def fetch_sequence(chrom, pos):
         f"{chrom}:{start}..{end}?content-type=text/plain"
     )
 
-    # Stores the server's response into a variable called 'r'
-    r =  requests.get(url)
+    # Try 3 times to acess the ENSEMBL REST API, with a timeout of 15 seconds
+    for attempt in range(max_retries):
+        try: 
+             r = requests.get(url, timeout=timeout)
+        # If the ENSEMBL REST API does give a cooldown/error, try again after a few seconds
+        # Give up on the variant if ENSEMBL REST API keeps giving cooldowns
+        except (requests.exceptions.RequestException, OSError):
+            time.sleep(1+attempt)
+            continue
 
-    # If something like a 404 error comes up, return None
+    # If the status code is specifically too many requests, wait for a few seconds
+        if r.status_code == 429:
+            time.sleep(2+attempt*2)
+            continue 
+
+    
+    # If something like a 404 error comes up, return None.
     if r.status_code != 200:
         return None
     
@@ -132,7 +145,7 @@ def apply_variant(seq, ref, alt):
         return seq[:center] + alt + seq[center+1:] 
 
 # Defines key information, like pos, chrom, ref, alt, etc, and then outputs it. It uses many
-# defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
+# previously defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
 def build_ClinVar_dataset(ClinVar_path, out_path):
     df = load_ClinVar(ClinVar_path)
     rows = []
@@ -156,7 +169,8 @@ def build_ClinVar_dataset(ClinVar_path, out_path):
         chrom = str(row["Chromosome"])
 
         # Tries to cast the Position into an integer format. 
-        # Position VCF aligns with Ensembl API, which is why it was used and not Position.
+        # Position VCF is used for ClinVar's column names rather than Position, which is 
+        # used for gnomAD.
         try: 
             pos = int(row["PositionVCF"])
         # If an error is thrown, iterate to the next row, since this one is not needed.
@@ -229,17 +243,17 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, faf_threshold  = 0.001):
     rows = []
     for _, row in df.iterrows():
 
-        # Intializes chromosome identifier, and maps the PositionVCF to an integer format
+        # Intializes chromosome identifier, and maps the Position to an integer format
         # Unless an error occurs, where it goes to the next row.
         chrom = str(row["Chromosome"])
         try:
-            pos = int(row["PositionVCF"])
+            pos = int(row["Position"])
         except (ValueError, TypeError):
             continue
 
         # Intializes ref and alt to their respective positions
-        ref = str(row["ReferenceAlleleVCF"])
-        alt = str(row["AlternateAlleleVCF"])
+        ref = str(row["Reference"])
+        alt = str(row["Alternate"])
 
         # Filters for only SNVs, skips things like "CT" in one space
         VALID_BASES = {"A", "C", "G", "T"} 
