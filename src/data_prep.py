@@ -110,7 +110,7 @@ def fetch_sequence(chrom, pos, timeout=15, max_retries=3):
         f"https://rest.ensembl.org/sequence/region/human/"
         f"{chrom}:{start}..{end}?content-type=text/plain"
     )
-
+    r = None
     # Try 3 times to acess the ENSEMBL REST API, with a timeout of 15 seconds
     for attempt in range(max_retries):
         try: 
@@ -126,9 +126,10 @@ def fetch_sequence(chrom, pos, timeout=15, max_retries=3):
             time.sleep(2+attempt*2)
             continue 
 
-    
+        break 
+
     # If something like a 404 error comes up, return None.
-    if r.status_code != 200:
+    if r is None or r.status_code != 200:
         return None
     
         # Returns the ACTG string from the Ensembl REST API, formatted properly.
@@ -146,13 +147,17 @@ def apply_variant(seq, ref, alt):
 
 # Defines key information, like pos, chrom, ref, alt, etc, and then outputs it. It uses many
 # previously defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
-def build_ClinVar_dataset(ClinVar_path, out_path):
+def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
     df = load_ClinVar(ClinVar_path)
     rows = []
 
     # This for loop iterates every row (rather than column headers like normal)  using iterrows, but the _ makes it so that 
-    # it so that index numbers are discarded.
-    for _, row in df.iterrows():
+    # it so that index numbers are discarded. Also adds a progress tracker
+    for i, (_, row) in enumerate(df.iterrows()):
+        if limit is not None and i >= limit:
+            break
+        if i % 100 == 0:
+            print(f"...processed {i}/{len(df)} rows, {len(rows)} kept so far")
 
         # Calls the label_row function from earlier, and assigns the clinical significance
         # (e.g. pathogenic) to "label", as a string for the model. Remember, because I'm putting the three
@@ -241,7 +246,12 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, faf_threshold  = 0.001):
     # This code is very similar to build_ClinVar_dataset, and is still needed, for filtering for 
     # only needed data.
     rows = []
-    for _, row in df.iterrows():
+    # Makes the for loop, with iterrows for index, and a progress tracker
+    for i, (_, row) in enumerate(df.iterrows()):
+        if i % 100 == 0:
+            print(f"...processed {i}/{len(df)} rows, {len(rows)} kept so far")
+
+        label = label_row(row["GeneSymbol"], str(row["ClinicalSignificance"]), str(row["Name"]))
 
         # Intializes chromosome identifier, and maps the Position to an integer format
         # Unless an error occurs, where it goes to the next row.
