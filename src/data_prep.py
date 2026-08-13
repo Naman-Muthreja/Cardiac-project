@@ -99,7 +99,7 @@ def label_row(gene, clinsig, name ):
         return "Benign"
     return None 
 
-def fetch_sequence(chrom, pos, timeout=15, max_retries=3):
+def fetch_sequence(chrom, pos, timeout=8, max_retries=2):
 
     # Makes sure that the position of the variant is exactly the half way point
     start = pos - HALF
@@ -148,7 +148,12 @@ def apply_variant(seq, ref, alt):
 # Defines key information, like pos, chrom, ref, alt, etc, and then outputs it. It uses many
 # previously defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
 def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
+
     df = load_ClinVar(ClinVar_path)
+
+    # Randomly drops half of the variants for times sake
+    df = df.sample(frac=0.5, random_state=42).reset_index(drop=True) 
+
     rows = []
 
     # This for loop iterates every row (rather than column headers like normal)  using iterrows, but the _ makes it so that 
