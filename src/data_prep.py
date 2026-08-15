@@ -161,8 +161,15 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
     for i, (_, row) in enumerate(df.iterrows()):
         if limit is not None and i >= limit:
             break
+
+        # Displays every 100 rows
         if i % 100 == 0:
             print(f"...processed {i}/{len(df)} rows, {len(rows)} kept so far")
+
+        # Creates an autosaving mechanism so all progress isn't loss if downloading stops.
+        if i % 500 == 0 and i > 0:
+            pd.DataFrame(rows).to_csv(out_path + ".partial.csv", index=False)
+            print(f"...checkpoint saved at row {i} ({len(rows)} kept so far)")
 
         # Calls the label_row function from earlier, and assigns the clinical significance
         # (e.g. pathogenic) to "label", as a string for the model. Remember, because I'm putting the three
@@ -240,6 +247,11 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, faf_threshold  = 0.001):
     # A NaN value gets filled with an empty string.
 
     passes_qc = (df["Filters - exomes"].fillna("").eq("PASS") | df["Filters - genomes"].fillna("").eq("PASS"))
+
+    # Creates an autosaving mechanism so all progress isn't loss if downloading stops.
+    if i % 500 == 0 and i > 0:
+            pd.DataFrame(rows).to_csv(f"gnomad_{gene}_partial.csv", index=False)
+            print(f"...{gene} checkpoint saved at row {i} ({len(rows)} kept so far)")
 
     # Only rows that evaluate "PASS" as True will move on.
     df = df[passes_qc]

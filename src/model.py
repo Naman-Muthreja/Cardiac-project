@@ -4,8 +4,8 @@ import torch.nn as nn
 class CardiacCNN(nn.module):
 
     # Takes in input length 201, matching encoding.py, and also outputs from a range of 3 classes,
-    # which are HCM, DCM, and Benign
-    def __init__(self, seq_len = 201, n_classes = 3):
+    # which are HCM, DCM, and Benign.
+    def __init__(self, len_seq = 201, n_classes = 3):
         super.__init__()
 
         # Does the first convolutional layer, goes from 4 bases input, to 32 different layers for 
@@ -13,6 +13,40 @@ class CardiacCNN(nn.module):
         # overwhelming the model and taking too much time, and padding gets added as 5 to prevent biases
         # between the amount of times the first base is read when compared to the middle.
         self.conv1= nn.Conv1d(in_channels = 4, out_channels = 32, kernel_size = 11, padding = 5)
-        # Output equals new input
+        # Output equals new input.
         self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=7, padding=3)
         self.conv3 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
+
+        # Stores and normalizes all the out_channels layers using BatchNorm1d, whiches
+        # forces the mean to be 0 and standard deviation as 1, while using learnable parameters to prevent
+        # ruining ReLU (half of the values will go from negative to 0 if no learnable parameters 
+        # were there) or amplifying background noise.
+        self.bn1 = nn.BatchNorm1d(32)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.bn3 = nn.BatchNorm1d(128)
+
+        # Creates a max pooling function, which takes in the highest activation value from
+        # each 2-base window, filtering out some noise.
+        self.pool = nn.MaxPool1d(kernel_size=2)
+
+        # Defines the ReLU activation function, which uses nonlinear activations for complex
+        # learning.
+        self.relu = nn.ReLU()
+
+        # Defines the dropout function to prevent overfitting.
+        self.dropout = nn.Dropout(0.4)
+
+        # Defines the reduced length after 3 max poolings (1 max pool per layer) using 
+        # floor division to yield an integer answer.
+        reduced_len = len_seq // 2 // 2 // 2 
+
+        # Having too many parameters may cause my model to overfit and memorize the training set
+        # rather than understand the biology. To prevent this, I defined fc1 and fc2 
+        # before the forward pass, which uses nn.Linear() to ompress the 128 units into 32. 
+        # Those 32 units will then map to 3 output classes (HCM, DCM, Benign). The formula used for
+        # fc1 is xW^t + b, where W is the weight matrix, and b is the bias vector.
+
+        self.fc1= nn.Linear(reduced_len * 128, 32)
+        self.fc2 = nn.Linear(32, n_classes)
+
+
