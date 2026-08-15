@@ -1,3 +1,4 @@
+# encoding.py one-hot encodes the DNA bases for inputs to training
 import numpy as np
 import torch
 

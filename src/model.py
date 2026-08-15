@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn 
 
-class CardiacCNN(nn.module):
+# Functions as a blueprint for training.py
+class CardiacCNN(nn.Module):
 
     # Takes in input length 201, matching encoding.py, and also outputs from a range of 3 classes,
     # which are HCM, DCM, and Benign.
-    def __init__(self, len_seq = 201, n_classes = 3):
-        super.__init__()
+    def __init__(self, seq_len = 201, n_classes = 3):
+        super().__init__()
 
         # Does the first convolutional layer, goes from 4 bases input, to 32 different layers for 
         # the 1D CNN to use to improve efficiency. Kernel size 11 takes in biological data without 
@@ -38,15 +39,35 @@ class CardiacCNN(nn.module):
 
         # Defines the reduced length after 3 max poolings (1 max pool per layer) using 
         # floor division to yield an integer answer.
-        reduced_len = len_seq // 2 // 2 // 2 
+        reduced_len = seq_len // 2 // 2 // 2 
 
         # Having too many parameters may cause my model to overfit and memorize the training set
         # rather than understand the biology. To prevent this, I defined fc1 and fc2 
         # before the forward pass, which uses nn.Linear() to ompress the 128 units into 32. 
         # Those 32 units will then map to 3 output classes (HCM, DCM, Benign). The formula used for
-        # fc1 is xW^t + b, where W is the weight matrix, and b is the bias vector.
-
+        # fc1 is xW^t + b.
         self.fc1= nn.Linear(reduced_len * 128, 32)
         self.fc2 = nn.Linear(32, n_classes)
 
+    def forward(self, x):
 
+        # Defining the first, second, and third convolutional layers
+        x = self.pool(self.relu(self.bn1(self.conv1(x))))
+        x = self.pool(self.relu(self.bn2(self.conv2(x))))
+        x = self.pool(self.relu(self.bn3(self.conv3(x))))
+
+        # Flattening into a single vector per batch (by merging the sequence_length and 
+        # number of channels to one). Start_dim = 1 ensures that flattening only occurs on the
+        # first dimension (index starts with 0), meaning that the batch_size is not multiplied.
+        # Note: If batch_size were to be multiplied, it would cause errors, because batch_size
+        # seperates individual samples.
+        x = x.flatten(start_dim = 1)
+
+        # Calls the dropout function to prevent overfitting, does the first fully connected layer
+        x = self.dropout(self.relu(self.fc1(x)))
+
+        # Returns the 3 outputs (HCM, DCM, Benign)
+        x = self.fc2(x)
+        return x
+    
+        # Note that SoftMax is not used yet, because CrossEntropyLoss has an inbuilt SoftMax function
