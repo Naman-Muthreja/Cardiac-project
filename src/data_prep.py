@@ -152,9 +152,7 @@ def apply_variant(seq, ref, alt):
 def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
 
     df = load_ClinVar(ClinVar_path)
-
-    # Randomly drops half of the variants for times sake
-    df = df.sample(frac=0.5, random_state=42).reset_index(drop=True) 
+   
 
     rows = []
 
