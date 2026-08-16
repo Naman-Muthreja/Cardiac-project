@@ -113,7 +113,7 @@ def fetch_sequence(chrom, pos, timeout=8, max_retries=2):
         f"{chrom}:{start}..{end}?content-type=text/plain"
     )
     r = None
-    # Try 3 times to acess the ENSEMBL REST API, with a timeout of 15 seconds
+    # Try 2 times to acess the ENSEMBL REST API, with a timeout of 15 seconds
     for attempt in range(max_retries):
         try: 
              r = requests.get(url, timeout=timeout)
@@ -152,7 +152,9 @@ def apply_variant(seq, ref, alt):
 def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
 
     df = load_ClinVar(ClinVar_path)
-   
+
+    # Randomly drops 20 percent of the dataset to save time
+    df = df.sample(frac = 0.75, random_state=42).reset_index(drop = True)
 
     rows = []
 
