@@ -149,13 +149,19 @@ def apply_variant(seq, ref, alt):
 
 # Defines key information, like pos, chrom, ref, alt, etc, and then outputs it. It uses many
 # previously defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
-def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
+def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.50, new_frac=1.0, seed=42):
 
     df = load_ClinVar(ClinVar_path)
 
-    # Randomly drops 20 percent of the dataset to save time
-    df = df.sample(frac = 0.75, random_state=42).reset_index(drop = True)
-
+    # Because seeds include reproducible data, this checks the old seed, sees what should have
+    # been saved, and skips it, so that it only adds the 50% not saved in the first pass
+    # into the dataset.
+    new_sample = df.sample(frac=new_frac, random_state=seed)
+    if old_frac > 0:
+        old_sample = df.sample(frac=old_frac, random_state=seed)
+        df = new_sample[~new_sample.index.isin(old_sample.index)]
+    else:
+        df = new_sample
     rows = []
 
     # This for loop iterates every row (rather than column headers like normal)  using iterrows, but the _ makes it so that 
@@ -231,9 +237,13 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None):
             }
         )
 
-    # Makes a df of the data collected, shows it saved, and counts how many times
-    # a pathogenic vs benign classification appeared.
+    # Creates a data saving mechanism so that I can run the file in two 10-hour parts instead
+    # of one 20-hour data extraction process. Makes sure to save the dataset without indexes being
+    # scattered, using ignore_index = True. 
     out = pd.DataFrame(rows)
+    if old_frac > 0:
+        old_out = pd.read_csv(out_path)
+        out = pd.concat([old_out, out], ignore_index=True)
     out.to_csv(out_path, index=False)
     print(f"Saved {len(out)} sequences to {out_path}")
     print(out["label"].value_counts())
