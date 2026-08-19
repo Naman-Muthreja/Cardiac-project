@@ -26,7 +26,7 @@ def cap_benign(df, max_benign = None, seed = 42):
     total_pathogenic = counts.get("HCM", 0) + counts.get("DCM, 0")
 
     # Makes # benign variants 4 times HCM and DCM combined, because benignity is more common
-    # than HCM and DCM. However, the previous amount of benign variants could case data biases.
+    # than HCM and DCM. However, the previous amount of benign variants could cause data biases.
     if max_benign is None:
         max_benign = 4 * total_pathogenic
 
@@ -91,7 +91,39 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
     weights = torch.tensor(counts.sum() / (3 * np.maximum(counts,1)), dtype = torch.float32).to(device)
 
    # Intializes CrossEntropyLoss, which compares the model's prediction to the correct
-   # answer and scales loss logarithimically
+   # answer and scales loss logarithimically. It combines Softmax 
+    criterion = nn.CrossEntropyLoss(weight = weights)
 
-    criterion = nn.CrossEntropyLoss(weights = weights)
+    # Sets the optimizer to the Adam (Adaptive moment estimation) optimizer, which uses an
+    # adaptive parameter for each model weight. Weight decay penalizes large weights, so the model
+    # learns patterns and not noise.
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
+    # Goes to evaluation mode and returns accuracy
+    def evaluate(loader):
+
+        # Evaluation mode sets self.training = false, stopping the dropout function, to give the 
+        # real accuracy
+        model.eval()
+
+        # Starts the count of correct and total at 0 (to be added)
+        correct, total = 0, 0
+
+        # torch.no_grad() disables gradient calculation to speed up computation
+        with torch.no_grad():
+
+            # x batch is the sequence, y is the label (see prepare_tensors)
+            for xb, yb in loader:
+                xb, yb = xb.to(device), yb.to(device)
+
+                # Sets preds as the index of the highest prediction score a class got. For example,
+                # a benign variant would most likely have the highest score be from the benign class,
+                # so the output would be 2.
+                preds = model(xb).argmax(dim = 1)
+
+                # Sets correct to the amount of indexes the model returned that matched the data
+                correct += (preds == yb).sum().item()
+                total += xb.size(0)
+
+                # Compares correct guesses to the total, finding accuracy as a percentage.
+                return correct/total * 100
