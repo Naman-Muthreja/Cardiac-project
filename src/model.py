@@ -66,7 +66,7 @@ class CardiacCNN(nn.Module):
         # Calls the dropout function to prevent overfitting, does the first fully connected layer
         x = self.dropout(self.relu(self.fc1(x)))
 
-        # Returns the 3 outputs (HCM, DCM, Benign)
+        # Returns the logit score of each of the 3 outputs (HCM, DCM, Benign)
         x = self.fc2(x)
         return x
     
