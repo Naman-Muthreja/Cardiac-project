@@ -7,7 +7,8 @@ import torch.nn as nn
 
 # Importing the data analysis methods
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
 
 from encoding import encode_dataset
 from model import CardiacCNN
@@ -51,47 +52,39 @@ def prepare_tensors(df):
 def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4, seed = 42, max_benign = None):
 
     df = cap_benign(df, max_benign=max_benign, seed=seed)
-    # Returns X, which is the matrix of encoded sequences, and y, a vector of the label indexes.
-    X, y = prepare_tensors(df)
 
     # Tries to use GPU before going to CPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Binds the DNA sequences and labels together
-    full_ds = TensorDataset(X, y)
-    n_total = len(full_ds)
+    # The rest of the data
+    rest_df, demo_df = train_test_split(df, test_size=0.02, stratify=df["label"], random_state=seed)
+    train_val_df, test_df = train_test_split(rest_df, test_size=0.10/0.98, stratify=rest_df["label"], random_state=seed)
+    train_df, val_df = train_test_split(train_val_df, test_size=0.20/0.88, stratify=train_val_df["label"], random_state=seed)
 
-    # Allocates 70 percent of data to training, 15 percent to testing, and 15 percent to validation
-    # Int is used to chop off the decimal, since a whole number is needed.
-    n_train = int(0.70 * n_total)
-    n_validation = int(0.15 * n_total)
+    X_train, y_train = prepare_tensors(train_df)
+    X_val, y_val = prepare_tensors(val_df)
+    X_test, y_test = prepare_tensors(test_df)
 
-    # Subtraction used instead of int(0.15 * n_total) to prevent rounding issues and to make
-    # sure every row is accounted for.
-    n_test = n_total - n_train - n_validation
-
-    # Makes a random seed for reproductibility, and then splits the data randomly
-    seed_generator = torch.Generator().manual_seed(seed)
-    train_ds, validate_ds, test_ds = random_split(full_ds, [n_train, n_validation, n_test], generator=seed_generator)
+    train_ds = TensorDataset(X_train, y_train)
+    validate_ds = TensorDataset(X_val, y_val)
+    
 
     # Prints the dictionary of how many times each class appeared, to verify class counts
-    train_labels = y[train_ds.indices].numpy()
-    counts = np.bincount(train_labels, min_length = 3)
+    counts = np.bincount(y_train.numpy())
     print("Counts of each class in the training:", dict(zip(LABELS, counts)))
 
-    # Loads the dataset, 32 at a time
+    # Loads each dataset based on the proportional fraction of each split. Loads 32 sequences 
+    # at a time.
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(validate_ds, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
-
-    model = CardiacCNN(seq_len = X.shape[2], n_classes=3).to(device)
+    model = CardiacCNN(seq_len = X_train.shape[2], n_classes=3).to(device)
 
     # Intializes the inverse-frequency weights, with a higher penalty for misclassifying DCM and HCM, to further 
     # prevent the model from biasing towards the benign class.
     weights = torch.tensor(counts.sum() / (3 * np.maximum(counts,1)), dtype = torch.float32).to(device)
 
-   # Intializes CrossEntropyLoss, which compares the model's prediction to the correct
-   # answer and scales loss logarithimically. It combines Softmax too.
+    # Intializes CrossEntropyLoss, which compares the model's prediction to the correct
+    # answer and scales loss logarithimically. It combines Softmax too.
     criterion = nn.CrossEntropyLoss(weight = weights)
 
     # Sets the optimizer to the Adam (Adaptive moment estimation) optimizer, which uses an
@@ -175,19 +168,16 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
       val_acc = evaluate(val_loader)
 
           # Tracks and deep-copies the best model weights based on highest validation accuracy
-    if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_state = copy.deepcopy(model.state_dict())
+      if val_acc > best_val_acc:
+         best_val_acc = val_acc
+         best_state = copy.deepcopy(model.state_dict())
 
-    print(f"Epoch {epoch + 1}/{epochs} | Train Loss: {train_loss:.4f} | Val Acc: {val_acc:.4f}%")
+      print(f"Epoch {epoch + 1}/{epochs} | Train Loss: {train_loss:.4f} | Val Acc: {val_acc:.4f}%")
 
-          # Loads the parameters of the best trained model
+    # Loads the parameters of the best trained model
     model.load_state_dict(best_state)
     model.eval()
 
-    # Converts the sequences and labels to format (N,4,201) by using stack to combine
-    all_test_x = torch.stack([test_ds[i][0] for i in range(len(test_ds))])
-    all_test_y = torch.stack([test_ds[i][1] for i in range(len(test_ds))])
 
     # Turns on no_grad to reduce RAM usage and speed up the forward pass process
     with torch.no_grad():
@@ -195,7 +185,7 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
         print("Evaluation has started for the test predictions")
 
         # Plugs in the test dataset to model.py
-        test_logits = model(all_test_x.to(device))
+        test_logits = model(X_test.to(device))
 
         # Converts the logits to probabilities from 0 to 1
         test_probs = torch.softmax(test_logits, dim =1).cpu().numpy()
@@ -208,19 +198,19 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
         # does not use a DataLoader. Finds accuracy by finding the mean truth values
         # of 1.0 or 0.0 (hence the float) and using .item() to extract the values. Mean is safe
         # here because there is only one big batch.
-        test_acc = (preds == all_test_y).float().mean().item()
+        test_acc = (preds == y_test).float().mean().item()
 
         # Prints the best model version's accuracy
         print(f"\nFinal test accuracy: {test_acc * 100:.3f}")
 
         # Calculates One-vs-Rest Macro AUC-ROC scores
-        ovr_auc = roc_auc_score(all_test_y.numpy(), test_probs, multi_class="ovr", average = "macro")
+        ovr_auc = roc_auc_score(y_test.numpy(), test_probs, multi_class="ovr", average = "macro")
 
         print(f"Three-class macro one-vs-rest AUC-ROC: {ovr_auc:.3f}")
 
         # For binary AUC-ROC for comparison against REVEL and CADD, a binary class is made.
         benign_idx = LABELS.index("Benign")
-        y_binary = (all_test_y.numpy() != benign_idx).astype(int)
+        y_binary = (y_test.numpy() != benign_idx).astype(int)
 
         # Defines pathogenic_prob, which uses the fact that the probability of pathogenicity is
         # 1 - the probability of benignity.
@@ -230,3 +220,11 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
         binary_auc = roc_auc_score(y_binary, pathogenic_prob)
 
         print(f"Binary Pathogenic-vs-Benign AUC-ROC: {binary_auc:.3f}")
+
+        # Prints the classification report, with various data analysis methods like 
+        # f1 score, prints by name rather than index.
+        print(classification_report(y_test, preds, target_names = LABELS))
+
+        print(confusion_matrix(y_test, preds))
+
+        return model, (X_test, y_test), demo_df
