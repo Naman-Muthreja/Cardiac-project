@@ -132,7 +132,6 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
     for epoch in range(epochs):
 
       model.train()
-      print("The process of updating the model has started")   
 
       # Resets the running_loss (how a model is performing per epoch)
       running_loss = 0.0
@@ -184,8 +183,6 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
 
     # Turns on no_grad to reduce RAM usage and speed up the forward pass process
     with torch.no_grad():
-
-        print("Evaluation has started for the test predictions")
 
         # Plugs in the test dataset to model.py
         test_logits = model(X_test.to(device))
