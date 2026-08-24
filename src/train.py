@@ -49,7 +49,7 @@ def prepare_tensors(df):
     return X,y
 
 # Defines train_model, with several important parameters. 
-def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4, seed = 42, max_benign = None):
+def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4, seed = 42, max_benign = None, evaluate_test = True):
 
     df = cap_benign(df, max_benign=max_benign, seed=seed)
 
@@ -70,7 +70,7 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
     
 
     # Prints the dictionary of how many times each class appeared, to verify class counts
-    counts = np.bincount(y_train.numpy())
+    counts = np.bincount(y_train.numpy(), minlength=3)
     print("Counts of each class in the training:", dict(zip(LABELS, counts)))
 
     # Loads each dataset based on the proportional fraction of each split. Loads 32 sequences 
@@ -132,7 +132,7 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
     for epoch in range(epochs):
 
       model.train()
-      print("Training has started")   
+      print("The process of updating the model has started")   
 
       # Resets the running_loss (how a model is performing per epoch)
       running_loss = 0.0
@@ -178,6 +178,9 @@ def train_model(df, epochs = 40, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
     model.load_state_dict(best_state)
     model.eval()
 
+    # If evaluate_test is false, just return the model weights without doing the final test.
+    if not evaluate_test:
+        return model, (X_test, y_test), demo_df
 
     # Turns on no_grad to reduce RAM usage and speed up the forward pass process
     with torch.no_grad():
