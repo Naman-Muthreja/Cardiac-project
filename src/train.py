@@ -49,7 +49,7 @@ def prepare_tensors(df):
     return X,y
 
 # Defines train_model, with several important parameters. 
-def train_model(df, epochs = 25, batch_size = 32, lr = 1e-3, weight_decay = 1e-4, seed = 42, max_benign = None, evaluate_test = True):
+def train_model(df, epochs = 25, batch_size = 32, lr = 1e-3, weight_decay = 1e-3, seed = 42, max_benign = None, evaluate_test = True):
 
     df = cap_benign(df, max_benign=max_benign, seed=seed)
 
@@ -195,7 +195,7 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 1e-3, weight_decay = 1e-4
         # here because there is only one big batch.
         train_acc = (train_preds == y_train).float().mean().item()
 
-        # Prints the best model version's accuracy
+        # Prints the accuracy on the training rows that the model trained on (not validation_accuracy, that is unseen)
         print(f"\nFinal train accuracy: {train_acc * 100:.3f}")
 
         # Calculates One-vs-Rest Macro AUC-ROC scores
