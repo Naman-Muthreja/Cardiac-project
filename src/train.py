@@ -49,7 +49,7 @@ def prepare_tensors(df):
     return X,y
 
 # Defines train_model, with several important parameters. 
-def train_model(df, epochs = 25, batch_size = 32, lr = 1e-3, weight_decay = 2e-4, seed = 42, max_benign = None, evaluate_test = True):
+def train_model(df, epochs = 25, batch_size = 32, lr = 5e-4, weight_decay = 2.5e-4, seed = 42, max_benign = None, evaluate_test = True):
 
     df = cap_benign(df, max_benign=max_benign, seed=seed)
 
@@ -201,7 +201,7 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 1e-3, weight_decay = 2e-4
         # Calculates One-vs-Rest Macro AUC-ROC scores
         train_ovr_auc = roc_auc_score(y_train.numpy(), train_probs, multi_class="ovr", average = "macro")
 
-        print(f"Three-class macro one-vs-rest AUC-ROC: {train_ovr_auc:.3f}")
+        print(f"[TRAIN] Three-class macro one-vs-rest AUC-ROC: {train_ovr_auc:.3f}")
 
         # For binary AUC-ROC for comparison against REVEL and CADD, a binary class is made.
         benign_idx = LABELS.index("Benign")
@@ -214,7 +214,7 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 1e-3, weight_decay = 2e-4
         # Calculates binary AUC-ROC score
         train_binary_auc = roc_auc_score(train_y_binary, train_pathogenic_prob)
 
-        print(f"Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")        
+        print(f"[TRAIN] Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")        
 
     # If evaluate_test is false, just return the model weights without doing the final test.
     if not evaluate_test:
