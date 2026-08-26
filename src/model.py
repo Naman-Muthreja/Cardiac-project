@@ -43,10 +43,10 @@ class CardiacCNN(nn.Module):
 
         # Having too many parameters may cause my model to overfit and memorize the training set
         # rather than understand the biology. To prevent this, I defined fc1 and fc2 
-        # before the forward pass, which uses nn.Linear() to ompress the 128 units into 32. 
+        # before the forward pass, which uses nn.Linear() to ompress the 128 units into 16. 
         # Those 32 units will then map to 3 output classes (HCM, DCM, Benign). The formula used for
         # fc1 is xW^t + b.
-        self.fc1= nn.Linear(reduced_len * 128, 32)
+        self.fc1= nn.Linear(reduced_len * 128, 16)
         self.fc2 = nn.Linear(32, n_classes)
 
     def forward(self, x):
