@@ -47,7 +47,7 @@ class CardiacCNN(nn.Module):
         # Those 32 units will then map to 3 output classes (HCM, DCM, Benign). The formula used for
         # fc1 is xW^t + b.
         self.fc1= nn.Linear(reduced_len * 128, 16)
-        self.fc2 = nn.Linear(32, n_classes)
+        self.fc2 = nn.Linear(16, n_classes)
 
     def forward(self, x):
 
