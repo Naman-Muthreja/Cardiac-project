@@ -49,7 +49,7 @@ def prepare_tensors(df):
     return X,y
 
 # Defines train_model, with several important parameters. 
-def train_model(df, epochs = 35, batch_size = 32, lr = 5e-4, weight_decay = 2.5e-4, seed = 42, max_benign = None, evaluate_test = True):
+def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 42, max_benign = None, evaluate_test = True):
 
     df = cap_benign(df, max_benign=max_benign, seed=seed)
 
