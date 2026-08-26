@@ -35,7 +35,7 @@ class CardiacCNN(nn.Module):
         self.relu = nn.ReLU()
 
         # Defines the dropout function to prevent overfitting.
-        self.dropout = nn.Dropout(0.50)
+        self.dropout = nn.Dropout(0.42)
 
         # Defines the reduced length after 3 max poolings (1 max pool per layer) using 
         # floor division to yield an integer answer.
