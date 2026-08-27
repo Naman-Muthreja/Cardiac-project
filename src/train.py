@@ -195,7 +195,7 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
         val_acc = (val_preds == y_val).float().mean().item()
 
         # Prints the accuracy on the training rows that the model trained on (not validation_accuracy, that is unseen)
-        print(f"\nFinal Validatio naccuracy: {val_acc * 100:.3f}")
+        print(f"\nFinal Validation naccuracy: {val_acc * 100:.3f}")
         
         # Calculates One-vs-Rest Macro AUC-ROC scores for validation
         val_ovr_auc = roc_auc_score(y_val.numpy(), val_probs, multi_class="ovr", average = "macro")
