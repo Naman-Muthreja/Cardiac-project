@@ -212,7 +212,7 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
         
          # Calculates binary AUC-ROC score
         val_binary_auc = roc_auc_score(val_y_binary, val_pathogenic_prob)
-        print(f"[VALIDATE] Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")   
+        print(f"[VALIDATE] Binary Pathogenic-vs-Benign AUC-ROC: {val_binary_auc:.3f}")   
 
         # Accuracy and AUC-ROC finding for training is very similar
         train_logits = model(X_train.to(device))
@@ -235,7 +235,7 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
 
         train_binary_auc = roc_auc_score(train_y_binary, train_pathogenic_prob)
 
-        print(f"[TRAIN] Binary Pathogenic-vs-Benign AUC-ROC: {val_binary_auc:.3f}")        
+        print(f"[TRAIN] Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")        
 
     # If evaluate_test is false, just return the model weights without doing the final test.
     if not evaluate_test:
