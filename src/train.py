@@ -110,10 +110,9 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
 
-                # Sets preds as the index of the highest prediction score a class got. For example,
-                # a benign variant would most likely have the highest score be from the benign class,
-                # so the output would be 2.
-                preds = model(xb).argmax(dim = 1)
+                # Sets preds as the index of the highest prediction score a class got. Uses softmax to turn logits to probabilities
+                # For example, a benign variant would most likely have the highest score be from the benign class, so the output would be 2.
+                preds = model(xb).argmax(dim=1)
 
                 # Sets correct to the amount of indexes the model returned that matched the data
                 # .sum().item() is used rather than mean() because mean assumes that each batch
@@ -179,75 +178,94 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
 
     with torch.no_grad():
 
-        # Plugs in train dataset to model.py
-        train_logits = model(X_train.to(device))
+        # Plugs in validation dataset to model.py
+        val_logits = model(X_val.to(device))
 
         # Converts the logits to probabilities from 0 to 1
-        train_probs = torch.softmax(train_logits, dim =1).cpu().numpy()
+        val_probs = torch.softmax(val_logits, dim=1).cpu().numpy()
 
         # Horizontally checks each row for the highest prediction value (HCM, DCM, or Benign,
         # depending on the variant)
-        train_preds = train_logits.argmax(dim=1).cpu() 
+        val_preds = val_logits.argmax(dim=1).cpu()
 
         # Finds the test accuracy, different from the validation check because it
         # does not use a DataLoader. Finds accuracy by finding the mean truth values
         # of 1.0 or 0.0 (hence the float) and using .item() to extract the values. Mean is safe
         # here because there is only one big batch.
-        train_acc = (train_preds == y_train).float().mean().item()
+        val_acc = (val_preds == y_val).float().mean().item()
 
         # Prints the accuracy on the training rows that the model trained on (not validation_accuracy, that is unseen)
-        print(f"\nFinal train accuracy: {train_acc * 100:.3f}")
-
-        # Calculates One-vs-Rest Macro AUC-ROC scores
-        train_ovr_auc = roc_auc_score(y_train.numpy(), train_probs, multi_class="ovr", average = "macro")
-
-        print(f"[TRAIN] Three-class macro one-vs-rest AUC-ROC: {train_ovr_auc:.3f}")
+        print(f"\nFinal Validatio naccuracy: {val_acc * 100:.3f}")
+        
+        # Calculates One-vs-Rest Macro AUC-ROC scores for validation
+        val_ovr_auc = roc_auc_score(y_val.numpy(), val_probs, multi_class="ovr", average = "macro")
+        
+        print(f"[VALIDATION] Three-class macro one-vs-rest AUC-ROC: {val_ovr_auc:.3f}")
 
         # For binary AUC-ROC for comparison against REVEL and CADD, a binary class is made.
         benign_idx = LABELS.index("Benign")
+        val_y_binary = (y_val.numpy() != benign_idx).astype(int)
+        
+        # Defines pathogenic_prob, which uses the fact that the probability of pathogenicity is
+        # the probability of benignity.
+        val_pathogenic_prob = 1.0 - val_probs[:, benign_idx]
+        
+         # Calculates binary AUC-ROC score
+        val_binary_auc = roc_auc_score(val_y_binary, val_pathogenic_prob)
+        print(f"[VALIDATE] Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")   
+
+        # Accuracy and AUC-ROC finding for training is very similar
+        train_logits = model(X_train.to(device))
+
+        train_probs = torch.softmax(train_logits, dim =1).cpu().numpy()
+
+        train_preds = train_logits.argmax(dim=1).cpu() 
+
+        train_acc = (train_preds == y_train).float().mean().item()
+
+        print(f"\nFinal train accuracy: {train_acc * 100:.3f}")
+
+        train_ovr_auc = roc_auc_score(y_train.numpy(), train_probs, multi_class="ovr", average = "macro")
+        print(f"[TRAIN] Three-class macro one-vs-rest AUC-ROC: {train_ovr_auc:.3f}")
+
+        benign_idx = LABELS.index("Benign")
         train_y_binary = (y_train.numpy() != benign_idx).astype(int)
 
-        # Defines pathogenic_prob, which uses the fact that the probability of pathogenicity is
-        # 1 - the probability of benignity.
         train_pathogenic_prob = 1.0 - train_probs[:, benign_idx]
 
-        # Calculates binary AUC-ROC score
         train_binary_auc = roc_auc_score(train_y_binary, train_pathogenic_prob)
 
-        print(f"[TRAIN] Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")        
+        print(f"[TRAIN] Binary Pathogenic-vs-Benign AUC-ROC: {val_binary_auc:.3f}")        
 
     # If evaluate_test is false, just return the model weights without doing the final test.
     if not evaluate_test:
         return model, (X_test, y_test), demo_df
 
-    # Turns on no_grad to reduce RAM usage and speed up the forward pass process (for test this time)
+    # Turns on no_grad to reduce RAM usage and speed up the forward pass process (for the test this time)
+    # Finding AUC-ROC and accuracy for test is very similar to train and validation
     with torch.no_grad():
 
-        # Plugs in the test dataset to model.py
+       
         test_logits = model(X_test.to(device))
 
-# Converts the logits to probabilities from 0 to 1
+
         test_probs = torch.softmax(test_logits, dim =1).cpu().numpy()
 
-        # Horizontally checks each row for the highest prediction value (HCM, DCM, or Benign,
-        # depending on the variant)
+        
         test_preds = test_logits.argmax(dim=1).cpu() 
 
-        # Finds the test accuracy, different from the validation check because it
-        # does not use a DataLoader. Finds accuracy by finding the mean truth values
-        # of 1.0 or 0.0 (hence the float) and using .item() to extract the values. Mean is safe
-        # here because there is only one big batch.
+       
         test_acc = (test_preds == y_test).float().mean().item()
 
-        # Prints the best model version's accuracy
+       
         print(f"\nFinal test accuracy: {test_acc * 100:.3f}")
 
-        # Calculates One-vs-Rest Macro AUC-ROC scores
+        
         test_ovr_auc = roc_auc_score(y_test.numpy(), test_probs, multi_class="ovr", average = "macro")
 
         print(f"Three-class macro one-vs-rest AUC-ROC: {test_ovr_auc:.3f}")
 
-        # For binary AUC-ROC for comparison against REVEL and CADD, a binary class is made.
+        
         benign_idx = LABELS.index("Benign")
         test_y_binary = (y_test.numpy() != benign_idx).astype(int)
 
