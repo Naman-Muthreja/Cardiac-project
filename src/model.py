@@ -1,7 +1,9 @@
+"""
+Model.py functions as a blueprint for training.py, including the batch normalization, dropout, convolutional layers, and neuron outputs.
+"""
 import torch
 import torch.nn as nn 
 
-# Functions as a blueprint for training.py
 class CardiacCNN(nn.Module):
 
     # Takes in input length 201, matching encoding.py, and also outputs from a range of 3 classes,

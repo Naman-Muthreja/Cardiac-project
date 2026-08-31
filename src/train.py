@@ -1,4 +1,7 @@
-# train.py is the script responsible for training the CNN to optimize prediction accuracy
+""" 
+train.py is the script responsible for training the CNN to optimize prediction accuracy. It also conducts the validation and test
+data, using analysis methods like AUC-ROC and F1 scores.
+"""
 import pandas as pd
 import copy
 import numpy as np
@@ -285,5 +288,4 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
         # Prints the confusion matrix, which makes a table on exactly which variants were confused by the model
         print(confusion_matrix(y_test, test_preds))
 
-        
         return model, (X_test, y_test), demo_df

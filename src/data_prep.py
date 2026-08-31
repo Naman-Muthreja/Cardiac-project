@@ -1,5 +1,6 @@
-# data_prep.py filters for the specific data needed and exports it to one dataframe
-
+"""
+data_prep.py filters for the specific data needed and exports it to one dataframe
+"""
 # #imports, includes re(regular expression lib), time(pause between API calls),
 #pandas for viewing data, and requests to download data
 import re
