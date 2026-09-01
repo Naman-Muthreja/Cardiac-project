@@ -9,8 +9,8 @@ import pandas as pd
 import torch
 import requests
 from sklearn.linear_model import LogisticRegression
+from train import cap_benign
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
-from sklearn.model_selection import train_test_split
 
 # Defines the latest CADD version, must use a string
 CADD_VERSION = "GRCh38-v1.7"
@@ -95,9 +95,9 @@ def annotate_dataset(in_path, out_path, df = None):
         # Takes the values, sleeps to avoid exhausting API
         chrom, pos, ref, alt = row["chrom"], int(row["pos"]), row["ref"], row["alt"]
         cadd = fetch_cadd_score(chrom, pos, ref, alt)
-        time.sleep(0.2)
+        time.sleep(0.15)
         revel = fetch_revel_score(chrom, pos, ref, alt)
-        time.sleep(0.2)
+        time.sleep(0.15)
 
         # Appends the scores
         cadd_scores.append(cadd)
@@ -125,7 +125,7 @@ def evaluate_baseline(train_df, test_df, feature_cols, label = "label", seed = 4
     # Uses vectorized comparison to yield "1" for pathogenic and "0" for benign. Values is needed to convert into a NumPy array 
     # for logistic regression.
     y_train = (train_df[label] != "Benign").astype(int).to_numpy()
-    y_test = (test_df[label] != "Benign").astype(int).values
+    y_test = (test_df[label] != "Benign").astype(int).to_numpy()
 
     # Makes sure the data is a 2D dataframe, for logistic regression to actually work.
     X_train= train_df[feature_cols].to_numpy()
@@ -135,9 +135,9 @@ def evaluate_baseline(train_df, test_df, feature_cols, label = "label", seed = 4
     # data with the "answer key" and update weights.
     clf = LogisticRegression(max_iter = 1000, random_state= seed).fit(X_train, y_train)
 
-    y_pred = clf.pred(X_test)
+    y_pred = clf.predict(X_test)
 
-     # Prints the classification report and then the confusion matrix by comparing predictions with "answer key"
+     # Prints the classification report and then the confusion matrix by comparing the predictions with the "answer key"
 
     print(confusion_matrix(y_test, y_pred))
 
@@ -147,9 +147,27 @@ def evaluate_baseline(train_df, test_df, feature_cols, label = "label", seed = 4
     # Returns the model's Binary AUC-ROC score, returning the first index, which is the pathogenicity chance prediction
     return roc_auc_score(y_test, clf.predict_proba(X_test)[:, 1])
 
+def split_by_test_variants(df, test_df):
+
+    # Drops duplicates that may be inside of the dataset
+    df = df.drop_duplicates(subset = ["chrom", "pos", "ref", "alt"]).copy()
+
+    # This grabs the 4 aforementioned columns from the test table, combines those 4 values into a tuple for each variant, 
+    # and then puts all of those tuples into a lookup book using set(). This is useful because it functions as a variant key.
+    test_keys = set(map(tuple, test_df[["chrom","pos","ref","alt"]].to_numpy()))
+
+    # Compares the CADD/REVEL dataset to the test_keys dataset also used to test my 1D CNN. .apply() has the first parameter as the function
+    # being applied, and the second parameter is where it is being applied. In this case, it is converting each row to a tuple.
+    is_test = df[["chrom", "pos", "ref", "alt"]].apply(tuple, axis = 1).isin(test_keys)
    
-    
+    # Returns a copy of everything not in the CNN's test dataframe (for training), and everything that IS in the CNN's test dataframe (for testing)
+    # ~ flips the truth values
+    return df[~is_test].copy(), df[is_test].copy()
 
+# So that I do not overwhelm CADD and REVEL APIs with bulk lookups, I limit the amount of variants used to train the model to 1500, 
+# and I use the same amount of test variants as the 1D CNN.
 
+def build_annotation_subset(df, test_df, n_fit=1500, seed=42):
+    capped = cap_benign(df, max_benign=None, seed=seed)
 
     
