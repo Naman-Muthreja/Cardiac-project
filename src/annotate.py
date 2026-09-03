@@ -27,17 +27,12 @@ def fetch_cadd_score(chrom, pos, ref, alt, cadd_version = CADD_VERSION):
     # Json takes the API's response and makes it a list; the request specifies a specific variant, so record and extract its PHRED score
     cadd_returned_data = r.json()
 
-    # If there is data returned, find the first
-    if not cadd_returned_data:
-        return None
-    try:
-        return float(cadd_returned_data[0]["PHRED"])
+    # Returns the PHRED portion neded
+    for record in cadd_returned_data:
+        if record.get("Alt") == alt:
+            return float(record["PHRED"])
 
-    # Returns None if there is a key error rather than crashing everthing
-    except (KeyError, TypeError, ValueError):
-        return None
-
-# Uses a more complex formatted string literal to fetch the chrom, pos, ref, alt of the right REVEL version
+# Fetches the REVEL score
 def fetch_revel_score(chrom, pos, ref, alt, assembly = "hg38"):
 
     # Sets the ID in HGVS genomic notation, uses chr to refer to a chromosome (MyVariant.info needs it) and .g to refers to a genomic coordinate
@@ -164,10 +159,86 @@ def split_by_test_variants(df, test_df):
     # ~ flips the truth values
     return df[~is_test].copy(), df[is_test].copy()
 
-# So that I do not overwhelm CADD and REVEL APIs with bulk lookups, I limit the amount of variants used to train the model to 1500, 
-# and I use the same amount of test variants as the 1D CNN.
+# So that I do not overwhelm CADD and REVEL APIs with bulk lookups, # CADD asks not to be used for bulk lookups, 
+# so I annotate only what the benchmark needs, which is all 716 of the CNN's test variants to score on, plus 1500 others to fit
+# the CADD/REVEL logistic regression on.
 
 def build_annotation_subset(df, test_df, n_fit=1500, seed=42):
+
+    # Caps the amount of benign variants inside of the dataset
     capped = cap_benign(df, max_benign=None, seed=seed)
+
+    # Splits the capped dataset into the CNN's 716 test variants (to grade the
+    # baseline on) and everything else (to fit the baseline on)
+    train_pool, test_pool = split_by_test_variants(capped, test_df) 
+
+    # Takes the minimum of n_fit and train_pool, just incase n_fit is not exactly 1500
+    n_fit = min(n_fit, len(train_pool))
+
+    frac = n_fit / len(train_pool) 
+    print(f"Kept {frac * 100:.1f} % of train_pool variants, which is {len(train_pool)}")
+
+    # Makes an empty list later to be added onto
+    pieces = []
+
+    # for loop that basically says "for every label, find the number of rows using formula len(g) * frac, and then append it to 
+    # an empty list called pieces."
+    for _, g in train_pool.groupby("label"):
+
+        n_rows = max(1, int(round(frac * len(g))))
+        pieces.append(g.sample(n=n_rows, random_state=seed))
+
+    train_rows = pd.concat(pieces)
+
+    # Stacks the 716 testing rows on top of the 1500 trai rows
+    subset = pd.concat([test_pool, train_rows], ignore_index=True)
+
+    print(f"Annotation subset: {len(subset)} rows "
+          f"({len(test_pool)} to test on + {len(train_rows)} to train with)")
+
+    return subset
+
+# Shows how well REVEL and CADD do by themselves.
+def revel_cadd_benchmark(df, test_df, label = "label", seed = 42):
+
+    # Splits by the test variants before doing the benchmark
+    train_df, test_df = split_by_test_variants(df, test_df)
+
+    # Creates an empty dict, seperating by name rather than number, and then defines the CADD alone and REVEL alone
+    results = {}
+    feature_sets = [("CADD Alone", ["cadd_phred"] ), ("REVEL alone (only missense)", ["revel_scores"])]
+
+    for name, cols in feature_sets:
+
+        # Drop the missing values and only look at the specific columns without the missing values.
+        train_ready = train_df.dropna(subset = cols)
+        test_ready = test_df.dropna(subset=cols)
+
+        # If there are a too few amount of variants, don't follow through the test.
+        if len(train_ready) <= 20 or len(test_ready) <= 20:
+            print(f"train_ready amount of rows is {len(train_ready)}, and test ready amount of rows is {len(test_ready)}")
+            print("This means that there are too few variants.")
+            continue
+
+        # If there aren't two unique classes, having AUC-ROC is pointless. nunique checks how many unique truth values there are.
+        # In this case, two seperate classes would yield "True" for the pathogenic class, and "False" for "Benign", meaning there are 2
+        # truth values
+        if(test_ready[label] != "Benign").nunique() < 2:
+            print(f"There are not enough unique classes, ")
+            continue
+
+        # Print the amount of training variants and testing variants
+        print(f"\n====={name} | training = {len(train_ready)} | testing = {len(test_ready)} ======")
+
+        # Evaluate_baseline (previously defined) is called, yielding several data metrics.
+        results[name] = evaluate_baseline(train_ready, test_ready, cols, label, seed)
+
+    return results
+
+
+
+
+
+
 
     
