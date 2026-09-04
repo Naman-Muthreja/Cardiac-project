@@ -20,17 +20,26 @@ def fetch_cadd_score(chrom, pos, ref, alt, cadd_version = CADD_VERSION):
     url = f"https://cadd.gs.washington.edu/api/v1.0/{cadd_version}/{chrom}:{pos}_{ref}_{alt}"
 
     # Uses requests to get the url, makes sure there is no error
-    r = requests.get(url)
-    if r.status_code != 200:
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return None
+    except (requests.exceptions.RequestException, OSError):
         return None
 
     # Json takes the API's response and makes it a list; the request specifies a specific variant, so record and extract its PHRED score
     cadd_returned_data = r.json()
 
-    # Returns the PHRED portion neded
+    # Returns the PHRED portion needed
     for record in cadd_returned_data:
-        if record.get("Alt") == alt:
-            return float(record["PHRED"])
+        try:
+            if isinstance(record, dict) and record.get("Alt") == alt:
+                return float(record["PHRED"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    # If nothing matches, return None (just like if there is a key error, type error, or value error)
+    return None
 
 # Fetches the REVEL score
 def fetch_revel_score(chrom, pos, ref, alt, assembly = "hg38"):
@@ -190,7 +199,7 @@ def build_annotation_subset(df, test_df, n_fit=1500, seed=42):
 
     train_rows = pd.concat(pieces)
 
-    # Stacks the 716 testing rows on top of the 1500 trai rows
+    # Stacks the 716 testing rows on top of the 1500 train rows
     subset = pd.concat([test_pool, train_rows], ignore_index=True)
 
     print(f"Annotation subset: {len(subset)} rows "
