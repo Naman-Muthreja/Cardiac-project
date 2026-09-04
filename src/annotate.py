@@ -54,13 +54,23 @@ def fetch_revel_score(chrom, pos, ref, alt, assembly = "hg38"):
 
     r = requests.get(url)
 
-    # Uses requests to get the url, makes sure there is no error
-    if r.status_code != 200:
+    # Uses requests to get the url, makes sure there is no requests error
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return None
+    except (requests.exceptions.RequestException, OSError):
         return None
 
     # Gets the API's response
     revel_returned_data = r.json()
 
+    for record in revel_returned_data:
+            try:
+                if isinstance(record, dict) and record.get("Alt") == alt:
+                    return float(record["PHRED"])
+            except (KeyError, TypeError, ValueError):
+                return None
     # Checks if the returned data is a dictorionary, and gets the dbnsfp key
     dbnsfp = revel_returned_data.get("dbnsfp",{}) if isinstance(revel_returned_data, dict) else {}
 
