@@ -1,5 +1,6 @@
 """
-Annotate.py fetches REVEL and CADD Binary AUC-ROC scores for comparison with my model.
+Annotate.py fetches REVEL and CADD Binary AUC-ROC scores for comparison with my model. Annotation in genomics means to attatch
+extra information to a variant previously unknown, hence the script's name.
 """
 
 # Imports (sk_roc_auc_score is used to avoid confusion with roc_auc score from train.py)
@@ -52,8 +53,6 @@ def fetch_revel_score(chrom, pos, ref, alt, assembly = "hg38"):
     url = (f"https://myvariant.info/v1/variant/{hgvs_id}"
            f"?assembly={assembly}&fields=dbnsfp.revel")
 
-    r = requests.get(url)
-
     # Uses requests to get the url, makes sure there is no requests error
     try:
         r = requests.get(url, timeout=10)
@@ -65,12 +64,7 @@ def fetch_revel_score(chrom, pos, ref, alt, assembly = "hg38"):
     # Gets the API's response
     revel_returned_data = r.json()
 
-    for record in revel_returned_data:
-            try:
-                if isinstance(record, dict) and record.get("Alt") == alt:
-                    return float(record["PHRED"])
-            except (KeyError, TypeError, ValueError):
-                return None
+    
     # Checks if the returned data is a dictorionary, and gets the dbnsfp key
     dbnsfp = revel_returned_data.get("dbnsfp",{}) if isinstance(revel_returned_data, dict) else {}
 
@@ -182,27 +176,21 @@ def split_by_test_variants(df, test_df):
 # so I annotate only what the benchmark needs, which is all 716 of the CNN's test variants to score on, plus 1500 others to fit
 # the CADD/REVEL logistic regression on.
 
-def build_annotation_subset(df, test_df, n_fit=1500, seed=42):
+def build_annotation_subset(train_df, test_df, n_fit=1500, seed=42):
 
-    # Caps the amount of benign variants inside of the dataset
-    capped = cap_benign(df, max_benign=None, seed=seed)
-
-    # Splits the capped dataset into the CNN's 716 test variants (to grade the
-    # baseline on) and everything else (to fit the baseline on)
-    train_pool, test_pool = split_by_test_variants(capped, test_df) 
 
     # Takes the minimum of n_fit and train_pool, just incase n_fit is not exactly 1500
-    n_fit = min(n_fit, len(train_pool))
+    n_fit = min(n_fit, len(train_df))
 
-    frac = n_fit / len(train_pool) 
-    print(f"Kept {frac * 100:.1f} % of train_pool variants, which is {len(train_pool)}")
+    frac = n_fit / len(train_df) 
+    print(f"Kept {frac * 100:.1f} % of train_pool variants, which is {len(train_df)}")
 
     # Makes an empty list later to be added onto
     pieces = []
 
     # for loop that basically says "for every label, find the number of rows using formula len(g) * frac, and then append it to 
     # an empty list called pieces."
-    for _, g in train_pool.groupby("label"):
+    for _, g in train_df.groupby("label"):
 
         n_rows = max(1, int(round(frac * len(g))))
         pieces.append(g.sample(n=n_rows, random_state=seed))
@@ -210,10 +198,10 @@ def build_annotation_subset(df, test_df, n_fit=1500, seed=42):
     train_rows = pd.concat(pieces)
 
     # Stacks the 716 testing rows on top of the 1500 train rows
-    subset = pd.concat([test_pool, train_rows], ignore_index=True)
+    subset = pd.concat([test_df, train_rows], ignore_index=True)
 
     print(f"Annotation subset: {len(subset)} rows "
-          f"({len(test_pool)} to test on + {len(train_rows)} to train with)")
+          f"({len(test_df)} to test on + {len(train_rows)} to train with)")
 
     return subset
 
