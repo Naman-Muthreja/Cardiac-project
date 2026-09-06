@@ -1,12 +1,13 @@
 """
 This function works out what a variant actually does to the protein, using the HGVS protein notation that ClinVar stores at the end of its Name
 column. After realizing that 0 DCM variants were actually able to be tested by REVEL, I wrote this function to see if there was something improper
-about the data. Running this function helped me conclude the two main issues in my code: Most benign variants were synonymous, and 
+about the data. Running this function helped me conclude the two main issues in my code: Most benign variants were synonymous, and my HCM and DCM
+code functioned as a simple gene classifier rather than learning real biological data.
 """
 
 import re
 
-# Matches the protein, followed by 3 letters which encode for an amino acid, then the position number, and then the name.
+# Matches the HGVS notation for a protein change, followed by 3 letters which encode for an amino acid, then the position number, and then the new amino acid.
 # Ex: for p.Arg663His (meaning that there was an amino acid change from Arginine to Histidine), it will capture "Arg", "663" and "His".
 # The last part means read 3 letters or an equal to sign, which is two ways ClinVar writes the amino acid. 
 HGVS_PROTEIN = re.compile(r"p\.([A-Za-z]{3})(\d+)([A-Za-z]{3}|=)")
@@ -34,7 +35,7 @@ def parse_consequence(name):
     # Ter is the termination codon, indicating a premature stop substitution has occured, a strong indicator of DCM.
 
     if alt_aa == "Ter":
-        return "nonsense (premature stop)"
+        return "nonsense"
 
     return "missense"
     
