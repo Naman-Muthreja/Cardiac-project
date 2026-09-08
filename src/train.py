@@ -44,7 +44,21 @@ def cap_benign(df, max_benign = None, seed = 42):
     capped = pd.concat([other, benign], ignore_index=True)
     print(f"Benign capped: {len(capped)}")
     return capped
- 
+# makes the test splits
+def make_splits(df, seed = 42):
+
+ # The first thing this returns is the rest_df, and the second is the demo_df (which is 2% of the total data, for demo purposes)
+        rest_df, demo_df = train_test_split(df, test_size = 0.02, stratify = df["label"], random_state = seed)
+
+        # I want test_df to be 10% of the ORIGINAL data, not 10% of what is left. rest_df is 98% of the original,
+        # so 0.10/0.98 of rest_df works out. Also implements data stratification so that the amount of variants in each split is balanced.
+        train_val_df, test_df = train_test_split(rest_df, test_size = 0.10/0.98, stratify = rest_df["label"], random_state = seed)
+
+        # train_val_df is 88% of the original, so 0.20/0.88 of it is 20% of the original, leaving 68% to train on.
+        train_df, val_df = train_test_split(train_val_df, test_size = 0.20/0.88, stratify = train_val_df["label"], random_state = seed)
+
+        return train_df, val_df, test_df, demo_df
+
 # One hot encodes the dataset(X), and then returns the unique index for each label(Y)
 def prepare_tensors(df):
     X = encode_dataset(df["sequence"].tolist())
@@ -59,20 +73,6 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
     # Tries to use GPU before going to CPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # makes the test splits
-    def make_splits(df, seed = 42):
-
-        # The first thing this returns is the rest_df, and the second is the demo_df (which is 2% of the total data, for demo purposes)
-        rest_df, demo_df = train_test_split(df, test_size = 0.02, stratify = df["label"], random_state = seed)
-
-        # I want test_df to be 10% of the ORIGINAL data, not 10% of what is left. rest_df is 98% of the original,
-        # so 0.10/0.98 of rest_df works out. Also implements data stratification so that the amount of variants in each split is balanced.
-        train_val_df, test_df = train_test_split(rest_df, test_size = 0.10/0.98, stratify = rest_df["label"], random_state = seed)
-
-        # train_val_df is 88% of the original, so 0.20/0.88 of it is 20% of the original, leaving 68% to train on.
-        train_df, val_df = train_test_split(train_val_df, test_size = 0.20/0.88, stratify = train_val_df["label"], random_state = seed)
-
-        return train_df, val_df, test_df, demo_df
 
     # Calls the make_splits function
     train_df, val_df, test_df, demo_df = make_splits(df, seed = seed)
