@@ -59,7 +59,7 @@ def gene_only_hcm_dcm(train_df, test_df):
     dcm_vs_hcm = (te["label"] == "DCM").astype(int)
 
     # If there aren't both DCM and HCM classes, return nan
-    if y.nunique() < 2:
+    if dcm_vs_hcm.nunique() < 2:
         return float("nan")
 
 
