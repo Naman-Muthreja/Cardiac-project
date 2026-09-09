@@ -5,6 +5,8 @@ data_prep.py filters for the specific data needed and exports it to one datafram
 #pandas for viewing data, and requests to download data
 import re
 import time
+import os
+from consequence import parse_consequence, VEP_TO_CONSEQUENCE
 import pandas as pd
 import requests
 
@@ -150,7 +152,7 @@ def apply_variant(seq, ref, alt):
 
 # Defines key information, like pos, chrom, ref, alt, etc, and then outputs it. It uses many
 # previously defined functions to accomplish this (Ex: fetch_sequence to get the DNA sequence).
-def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.50, new_frac=1.0, seed=42):
+def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.0, new_frac=1.0, seed=42):
 
     df = load_ClinVar(ClinVar_path)
 
@@ -245,31 +247,47 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.50, new
     if old_frac > 0:
         old_out = pd.read_csv(out_path)
         out = pd.concat([old_out, out], ignore_index=True)
-    out.to_csv(out_path, index=False)
-    print(f"Saved {len(out)} sequences to {out_path}")
-    print(out["label"].value_counts())
-    return out
+
+    # Takes the length of the output before duplicate variants are taken out
+    before = len(out)
+
+    # Drops the duplicate variants
+    new_out = out.drop_duplicates(subset=["chrom","pos","ref","alt"], keep="first")
+
+    # Prints the amount of rows dropped
+    print(f"Dropped {before - len(new_out)} duplicate (chrom, pos, ref, alt) rows")
+
+    # Makes the output (with dropped duplicates) a csv.
+    new_out.to_csv(out_path, index=False)
+
+    print(f"Saved {len(new_out)} sequences to {out_path}")
+    print(new_out["label"].value_counts())
+    return new_out
 
 # Makes a function similar to build_ClinVar_dataset used for ClinVar data, but with benign varaiants
-# from gnomAD to balance data. The faf_threshold (Filtering allele frequency) of 0.001  means
-# that the mutation is relatively common (1 in 1k), indicating benignity.
-def build_gnomAD_benign(gnomAD_csv_path, gene, faf_threshold  = 0.001):
+# from gnomAD to balance data. Targets is used to provide how much of each variant is needed.
+def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf_threshold = 1e-4, seed = 42, limit = None):
 
-    df = pd.read_csv(gnomAD_csv_path)
+    df = pd.read_csv(gnomAD_csv_path, low_memory=False)
     # If a gene passed quality control (qc) in the exome or whole genome, it is okay to move on.
     # A NaN value gets filled with an empty string.
-
     passes_qc = (df["Filters - exomes"].fillna("").eq("PASS") | df["Filters - genomes"].fillna("").eq("PASS"))
 
     # Only rows that evaluate "PASS" as True will move on.
     df = df[passes_qc]
 
     # If the Filtering allele frequency is greater than 0.001, keep the variant (benign needed only)
-    # Fills missing values with 0(which won't work) with fillna. 
-    df = df[df["GroupMax FAF frequency"].fillna(0) > faf_threshold]
+    # Fills missing values with 0(which won't work) with fillna. Also converts text to numbers
+    df["Allele Frequency"] = pd.to_numeric(df["Allele Frequency"], errors="coerce")
+    df = df[df["Allele Frequency"].fillna(0) > faf_threshold]
+    print(f"[{gene}] {len(df)} after AF > {faf_threshold}")
 
-    # This code is very similar to build_ClinVar_dataset, and is still needed, for filtering for 
-    # only needed data.
+    # Applies the dictionary lookup VEP_TO_CONSEQUENCE to each "VEP Annotation" in the dataframe, drops na, prints total
+    df["consequence"] = df["VEP Annotation"].map(VEP_TO_CONSEQUENCE)
+    df = df.dropna(subset=["consequence"])
+    print(df["consequence"].value_counts().to_string())
+
+    # This code is very similar to build_ClinVar_dataset, and is still needed, for filtering for only the needed data
     rows = []
     # Makes the for loop, with iterrows for index, and a progress tracker
     for i, (_, row) in enumerate(df.iterrows()):
@@ -323,7 +341,7 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, faf_threshold  = 0.001):
     return pd.DataFrame(rows)
 
 # Builds the final dataset combining both the gnomAD and ClinVar outputs.
-def build_full_dataset(ClinVar_path, gnomAD_csv_paths, out_path, faf_threshold = 0.001):
+def build_full_dataset(ClinVar_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6):
 
     # Stores the resulting Dataframe from build_ClinVar_dataset to ClinVar_rows
     ClinVar_rows = build_ClinVar_dataset(ClinVar_path, out_path)
@@ -338,11 +356,9 @@ def build_full_dataset(ClinVar_path, gnomAD_csv_paths, out_path, faf_threshold =
     # This finalizes a df for the gnomAD data, by combining data for each gene's CSV file
     # IgnoreIndex makes sure to reindex the variants instead of keeping the old indexes.
     # Also creates an empty df instead of crashing.
-
     gnomAD_rows = pd.concat(gnomAD_frames, ignore_index= True ) if gnomAD_frames else pd.DataFrame()
 
     # Merging all the data into one final df
-
     combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
     combined.to_csv(out_path, index = False)
 

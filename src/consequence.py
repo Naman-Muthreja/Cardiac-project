@@ -12,6 +12,19 @@ import re
 # The last part means read 3 letters or an equal to sign, which is two ways ClinVar writes the amino acid. 
 HGVS_PROTEIN = re.compile(r"p\.([A-Za-z]{3})(\d+)([A-Za-z]{3}|=)")
 
+VEP_TO_CONSEQUENCE = {
+    "missense_variant":         "missense",
+    "stop_gained":              "nonsense",
+    "synonymous_variant":       "synonymous",
+    "splice_donor_variant":     "noncoding",
+    "splice_acceptor_variant":  "noncoding",
+    "splice_region_variant":    "noncoding",
+    "intron_variant":           "noncoding",
+    "5_prime_UTR_variant":      "noncoding",
+    "3_prime_UTR_variant":      "noncoding",
+}
+
+
 def parse_consequence(name):
 
     # Returns unknown if the data is not a string
