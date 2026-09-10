@@ -136,7 +136,6 @@ def fetch_sequence(chrom, pos, timeout=8, max_retries=2):
     # If something like a 404 error comes up, return None.
     if r is None or r.status_code != 200:
         return None
-    
         # Returns the ACTG string from the Ensembl REST API, formatted properly.
     else: 
         return r.text.strip().upper()
@@ -287,6 +286,35 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
     df = df.dropna(subset=["consequence"])
     print(df["consequence"].value_counts().to_string())
 
+    picked = []
+    # Makes a for loop that iterates for every consequence and the amount of that consequence that I actually want, 
+    # using targets as a dictionary. Because of .items(), cons is a string, representing the consequence, like "missense", while
+    # want is the amount of variants wanted in that class.
+    for cons, want in targets.items():
+
+            # For each consequence in the previously defined df from the last function, check if the consequence column matches one of the cons
+            sub = df[df["consequence"] == cons]
+
+            #  I define “take” to be the minimum of the amount of variants that I want for a specific consequence, and the 
+            # total number of variants in that consequence. 
+            take = min(want, len(sub))
+
+            # If the amount of variants taken is lower than wanted, give a print message
+            if take < want:
+                print(f"Wanted {want}, but have {len(sub)} for {gene}/{cons}")
+
+            if take > 0:
+                picked.append(sub.sample(n=take, random_state = seed))
+
+            # I return an empty Pandas dataframe rather than "None" so later functions dont crash.
+            if not picked:
+                print("0 variants for picked")
+                return pd.DataFrame()
+
+    df = pd.concat(picked, ignore_index=True)
+
+
+
     # This code is very similar to build_ClinVar_dataset, and is still needed, for filtering for only the needed data
     rows = []
     # Makes the for loop, with iterrows for index, and a progress tracker
@@ -349,7 +377,7 @@ def build_full_dataset(ClinVar_path, gnomAD_csv_paths, out_path, faf_threshold =
     # Stores the resulting DataFrame from build_gnomAD_benign to gnomAD_frames,
     # for each of the gene-path pairs (MYH7, MYBPC3, and TTN). 
     gnomAD_frames = [
-        build_gnomAD_benign(path, gene, faf_threshold)
+        build_gnomAD_benign(path, gene, targets, faf_threshold)
         for gene, path in gnomAD_csv_paths.items()
     ]
 
