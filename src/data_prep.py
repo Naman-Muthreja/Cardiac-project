@@ -234,7 +234,7 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.0, new_
         rows.append(
             {
                 "sequence": mutant, "label": label, "gene": row["GeneSymbol"],
-                "pos": pos, "chrom": chrom, "ref": ref, "alt": alt,
+                "pos": pos, "consequence": parse_consequence(str(row["Name"])), "chrom": chrom, "ref": ref, "alt": alt,
                 "name": row["Name"],
             }
         )
@@ -263,9 +263,34 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.0, new_
     print(new_out["label"].value_counts())
     return new_out
 
+def consequence_targets(ClinVar_df, gene, ratio = 1.0):
+
+    # Checks for a true/false match per row for each gene. Takes the data from the built ClinVar dataframe, including the same properties,
+    # like gene, label, consequence, etc.
+    g = ClinVar_df[ClinVar_df["gene"] == gene]
+
+    # Defines pathogenic and benign using label from g, operating on the built g df.
+    pathogenic = g[g["label"] != "Benign"]
+    benign = g[g["label"] == "Benign"]
+
+    targets = {}
+    for cons, sub in pathogenic.groupby("consequence"):
+
+        # Counts the variant amounts wanted (the total of sub) and the amount I already have, to see how much gnomAD benign variants is needed
+        want = int(round(ratio *len(sub)))
+        have = len(benign[benign["consequence"] == cons])
+
+        # The amount of variants needed is the amount wanted - the amount I already have
+        need = max(0, want-have)
+        if need > 0:
+            targets[cons] = need
+    return targets
+    
+
+
 # Makes a function similar to build_ClinVar_dataset used for ClinVar data, but with benign varaiants
 # from gnomAD to balance data. Targets is used to provide how much of each variant is needed.
-def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf_threshold = 1e-4, seed = 42, limit = None):
+def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf_threshold = 1e-6, seed = 42, limit = None):
 
     df = pd.read_csv(gnomAD_csv_path, low_memory=False)
     # If a gene passed quality control (qc) in the exome or whole genome, it is okay to move on.
@@ -275,6 +300,21 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
     # Only rows that evaluate "PASS" as True will move on.
     df = df[passes_qc]
 
+    # Finds important information from ClinVar, drops gnomAD variants that completely match.
+    if exclude_keys is not None:
+        before = len(df)
+
+        # Zip converts different datatypes (like strings and values) into a single list of tuples
+        keys = zip(
+            df["Chromosome"].astype(str),
+            df["Position"].astype(int),
+            df["Reference"].astype(str),
+            df["Alternate"].astype(str),
+        )
+        df = df[[k not in exclude_keys for k in keys]]
+        print(f"[{gene}] dropped {before - len(df)} rows already in ClinVar")
+
+    
     # If the Filtering allele frequency is greater than 0.001, keep the variant (benign needed only)
     # Fills missing values with 0(which won't work) with fillna. Also converts text to numbers
     df["Allele Frequency"] = pd.to_numeric(df["Allele Frequency"], errors="coerce")
@@ -306,13 +346,17 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
             if take > 0:
                 picked.append(sub.sample(n=take, random_state = seed))
 
-            # I return an empty Pandas dataframe rather than "None" so later functions dont crash.
-            if not picked:
-                print("0 variants for picked")
-                return pd.DataFrame()
-
+    # I return an empty Pandas dataframe rather than "None" so later functions dont crash.
+    if not picked:
+         print("0 variants for 'picked'")
+         return pd.DataFrame()
+                 
     df = pd.concat(picked, ignore_index=True)
 
+    # If there is a limit used for verification, mention it.
+    if limit is not None:
+         df = df.head(limit)
+    
 
 
     # This code is very similar to build_ClinVar_dataset, and is still needed, for filtering for only the needed data
@@ -361,23 +405,34 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
         rows.append(
             {
                 "sequence": mutant, "label": "Benign", "gene": gene,
-                "pos": pos, "chrom": chrom, "ref": ref, "alt": alt,
+                "pos": pos, "consequence": row["consequence"], "af": float(row["Allele frequency"]), "chrom": chrom, "ref": ref, "alt": alt,
                 "name": "",
             }
         )
     # returns the df
     return pd.DataFrame(rows)
 
-# Builds the final dataset combining both the gnomAD and ClinVar outputs.
-def build_full_dataset(ClinVar_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6):
+# Builds the final dataset combining both the gnomAD and ClinVar outputs. Note: the second time I used this function, to make the data for benign variants
+# more spread out, I define one of the parameters as ClinVar_dataset_path instead of ClinVar_path, to prevent rebuilding the same ClinVar data again.
+def build_full_dataset(clinvar_dataset_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6):
+
+    # Loads the ClinVar path, checks for specific important information, sets that info as exclude_keys to be filtered out (so there is no overlap
+    # between gnomAD and ClinVar data).
+    clinvar_all = load_ClinVar(clinvar_dataset_path)
+    clinvar_keys = set(zip(
+         clinvar_all["Chromosome"].astype(str),
+         # The position must be numerical, so I use pandas to convert to an integer, and fill out all errors/crashes with -1.
+         pd.to_numeric(clinvar_all["PositionVCF"], errors="coerce").fillna(-1).astype(int),
+         clinvar_all["ReferenceAlleleVCF"].astype(str),
+         clinvar_all["AlternateAlleleVCF"].astype(str)))
 
     # Stores the resulting Dataframe from build_ClinVar_dataset to ClinVar_rows
-    ClinVar_rows = build_ClinVar_dataset(ClinVar_path, out_path)
+    ClinVar_rows = pd.read_csv(clinvar_dataset_path)
 
     # Stores the resulting DataFrame from build_gnomAD_benign to gnomAD_frames,
     # for each of the gene-path pairs (MYH7, MYBPC3, and TTN). 
     gnomAD_frames = [
-        build_gnomAD_benign(path, gene, targets, faf_threshold)
+        build_gnomAD_benign(path, gene, targets, exclude_keys = None, faf_threshold, seed = 42, limit = None)
         for gene, path in gnomAD_csv_paths.items()
     ]
 
