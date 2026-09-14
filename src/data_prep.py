@@ -476,7 +476,7 @@ def build_full_dataset(clinvar_dataset_path, clinvar_raw_path, gnomAD_csv_paths,
 
         # Removes matchups between gnomAD and ClinVar of the built dataset, using drop_duplicates(), keeping only the first of each duplicate.
         before = len(combined)
-        combined = combined.drop_duplicates(subset=["chrom", "ref", "alt", "position"], keep ="first")
+        combined = combined.drop_duplicates(subset=["chrom", "pos", "ref", "alt"], keep ="first")
 
         # Saves the data, prints the amount of duplicate variants and variants saved.
         print(f"\nDropped {before - len(combined)} duplicate variants")
