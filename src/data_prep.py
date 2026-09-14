@@ -5,7 +5,6 @@ data_prep.py filters for the specific data needed and exports it to one datafram
 #pandas for viewing data, and requests to download data
 import re
 import time
-import os
 from consequence import parse_consequence, VEP_TO_CONSEQUENCE
 import pandas as pd
 import requests
@@ -124,6 +123,7 @@ def fetch_sequence(chrom, pos, timeout=8, max_retries=2):
         # Give up on the variant if ENSEMBL REST API keeps giving cooldowns
         except (requests.exceptions.RequestException, OSError):
             time.sleep(1+attempt)
+            r = None
             continue
 
     # If the status code is specifically too many requests, wait for a few seconds
@@ -234,7 +234,7 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.0, new_
         rows.append(
             {
                 "sequence": mutant, "label": label, "gene": row["GeneSymbol"],
-                "pos": pos, "consequence": parse_consequence(str(row["Name"])), "chrom": chrom, "ref": ref, "alt": alt,
+                "pos": pos, "consequence": parse_consequence(str(row["Name"])),  "ref_sequence": seq, "chrom": chrom, "ref": ref, "alt": alt,
                 "name": row["Name"],
             }
         )
@@ -274,6 +274,8 @@ def consequence_targets(ClinVar_df, gene, ratio = 1.0):
     benign = g[g["label"] == "Benign"]
 
     targets = {}
+
+    # Finds the amount of pathogenic variants per consequence, later used with a ratio to find the amount of benign variants needed per consequence
     for cons, sub in pathogenic.groupby("consequence"):
 
         # Counts the variant amounts wanted (the total of sub) and the amount I already have, to see how much gnomAD benign variants is needed
@@ -286,8 +288,6 @@ def consequence_targets(ClinVar_df, gene, ratio = 1.0):
             targets[cons] = need
     return targets
     
-
-
 # Makes a function similar to build_ClinVar_dataset used for ClinVar data, but with benign varaiants
 # from gnomAD to balance data. Targets is used to provide how much of each variant is needed.
 def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf_threshold = 1e-6, seed = 42, limit = None):
@@ -307,7 +307,9 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
         # Zip converts different datatypes (like strings and values) into a single list of tuples
         keys = zip(
             df["Chromosome"].astype(str),
-            df["Position"].astype(int),
+             # The position must be numerical, so I use pandas to convert to an integer, and fill out all errors/crashes with -1 
+             # instead of NaN, which will still not work.
+            pd.to_numeric(df["Position"], errors="coerce").fillna(-1).astype(int),
             df["Reference"].astype(str),
             df["Alternate"].astype(str),
         )
@@ -405,7 +407,7 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
         rows.append(
             {
                 "sequence": mutant, "label": "Benign", "gene": gene,
-                "pos": pos, "consequence": row["consequence"], "af": float(row["Allele frequency"]), "chrom": chrom, "ref": ref, "alt": alt,
+                "pos": pos, "consequence": row["consequence"], "af": float(row["Allele Frequency"]), "chrom": chrom, "ref": ref, "alt": alt,
                 "name": "",
             }
         )
@@ -414,39 +416,95 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
 
 # Builds the final dataset combining both the gnomAD and ClinVar outputs. Note: the second time I used this function, to make the data for benign variants
 # more spread out, I define one of the parameters as ClinVar_dataset_path instead of ClinVar_path, to prevent rebuilding the same ClinVar data again.
-def build_full_dataset(clinvar_dataset_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6):
+# Builds the final dataset combining both the gnomAD and ClinVar outputs.
+def build_full_dataset(clinvar_dataset_path, clinvar_raw_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6, ratio = 1.0, seed = 42, limit = None):
 
-    # Loads the ClinVar path, checks for specific important information, sets that info as exclude_keys to be filtered out (so there is no overlap
-    # between gnomAD and ClinVar data).
-    clinvar_all = load_ClinVar(clinvar_dataset_path)
-    clinvar_keys = set(zip(
-         clinvar_all["Chromosome"].astype(str),
-         # The position must be numerical, so I use pandas to convert to an integer, and fill out all errors/crashes with -1.
-         pd.to_numeric(clinvar_all["PositionVCF"], errors="coerce").fillna(-1).astype(int),
-         clinvar_all["ReferenceAlleleVCF"].astype(str),
-         clinvar_all["AlternateAlleleVCF"].astype(str)))
-
-    # Stores the resulting Dataframe from build_ClinVar_dataset to ClinVar_rows
+    # Reads the rows from the built dataset from calling the function last time
     ClinVar_rows = pd.read_csv(clinvar_dataset_path)
 
-    # Stores the resulting DataFrame from build_gnomAD_benign to gnomAD_frames,
-    # for each of the gene-path pairs (MYH7, MYBPC3, and TTN). 
-    gnomAD_frames = [
-        build_gnomAD_benign(path, gene, targets, exclude_keys = None, faf_threshold, seed = 42, limit = None)
-        for gene, path in gnomAD_csv_paths.items()
-    ]
+    # Makes the source of ClinVar_rows "ClinVar", that way, I can look at the final dataset to see if a variant originates from ClinVar.
+    ClinVar_rows["source"] = "ClinVar"
+    print(f"Loaded {len(ClinVar_rows)} ClinVar rows from {clinvar_dataset_path}")
 
-    # This finalizes a df for the gnomAD data, by combining data for each gene's CSV file
-    # IgnoreIndex makes sure to reindex the variants instead of keeping the old indexes.
-    # Also creates an empty df instead of crashing.
-    gnomAD_rows = pd.concat(gnomAD_frames, ignore_index= True ) if gnomAD_frames else pd.DataFrame()
+    # If the consequence column is impresent in the clinvar columns, apply the parse consequence function from consequence.py
+    if "consequence" not in ClinVar_rows.columns:
+        ClinVar_rows["consequence"] = ClinVar_rows["name"].apply(parse_consequence)
 
-    # Merging all the data into one final df
-    combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
-    combined.to_csv(out_path, index = False)
+    clinvar_all = load_ClinVar(clinvar_raw_path)
 
-    # Prints how many times each label appears
-    print(f"Combined Dataset: {len(combined)} total sequences")
-    print(combined["label"].value_counts())
+    # Very similar to "keys" in build. Used later when calling build_gnomAD_benign
+    clinvar_keys = set(zip(
+        clinvar_all["Chromosome"].astype(str),
+        # The position must be numerical, so I use pandas to convert to an integer, and fill out all errors/crashes with -1 
+        # instead of NaN, which will still not work.
+        pd.to_numeric(clinvar_all["PositionVCF"], errors="coerce").fillna(-1).astype(int),
+        clinvar_all["ReferenceAlleleVCF"].astype(str),
+        clinvar_all["AlternateAlleleVCF"].astype(str)))
+    print(f"Exclusion set holds {len(clinvar_keys)} ClinVar variants")
 
-    return combined
+    gnomaAD_frames = []
+    # .items() returns a key-value pair, which respectively gets defined as gene and path. Path is each of the three gnomAD files.
+    for gene, path in gnomAD_csv_paths.items():
+
+        # Calls the consequence_targets function to find out how many of a variant type is needed per gene, then prints the values.
+        targets = consequence_targets(ClinVar_rows, gene, ratio=ratio)
+        print(f"\n{gene} targets: {targets}")
+
+        # Appends what returns after calling build_gnomAD_benign to gnomAD_frames. Uses the "targets" parameter to return the correct amount
+        # for each consequence. Path is defined from the for loop, and runs iteratively through all 3 file paths.
+        gnomaAD_frames.append(build_gnomAD_benign(path, gene, targets, exclude_keys = clinvar_keys,
+                                                   faf_threshold = faf_threshold, seed = seed, limit = limit))
+        
+        # Concatenates the 3 tables (one per class) to one single table called gnomAD_rows
+        gnomAD_rows = pd.concat(gnomaAD_frames, ignore_index=True) 
+
+        # Makes the source of ClinVar_rows "ClinVar", that way, I can look at the final dataset to see if a variant originates from ClinVar.
+        if len(gnomAD_rows) > 0:
+            gnomAD_rows["source"] = "gnomAD"
+
+        # Combines the ClinVar dataset and gnomAD dataset into one
+        combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
+
+        # I make sure to convert the ClinVar chrom, ref, alt to a string so it matches gnomAD's format. 
+        # For example, the number 14 becomes the string "14".
+        for c in ["chrom", "ref", "alt"]:
+            combined[c] = combined[c].astype(str)
+
+        # To ensure the two datasets can match in format when checking for duplicates, I ensure “pos” is an integer. This makes sure
+        # that 235 and 235.0 are still regarded as the same position. Na is -1 to prevent errors from occuring (like with NaN).
+        combined["pos"] = pd.to_numeric(combined["pos"], errors = "coerce").fillna(-1).astype(int)
+
+        # Removes matchups between gnomAD and ClinVar of the built dataset, using drop_duplicates(), keeping only the first of each duplicate.
+        before = len(combined)
+        combined = combined.drop_duplicates(subset=["chrom", "ref", "alt", "position"], keep ="first")
+
+        # Saves the data, prints the amount of duplicate variants and variants saved.
+        print(f"\nDropped {before - len(combined)} duplicate variants")
+        combined.to_csv(out_path, index=False)
+        print(f"Saved {len(combined)} rows to {out_path}")
+
+        # Prints the amount of variants per label, and a crosstab.
+        print(combined["label"].value_counts())
+        print(pd.crosstab([combined["gene"]], combined["consequence"], combined["label"]).to_string())
+
+        return combined
+
+# LEGACY build_full_dataset, which was used the first time
+# def build_full_dataset(clinvar_dataset_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6):
+#  clinvar_all = load_ClinVar(clinvar_dataset_path)
+#   clinvar_keys = set(zip(
+#        clinvar_all["Chromosome"].astype(str),
+#        pd.to_numeric(clinvar_all["PositionVCF"], errors="coerce").fillna(-1).astype(int),
+#        clinvar_all["ReferenceAlleleVCF"].astype(str),
+#        clinvar_all["AlternateAlleleVCF"].astype(str)))
+#   ClinVar_rows = pd.read_csv(clinvar_dataset_path)
+#   gnomAD_frames = [
+#        build_gnomAD_benign(path, gene, targets, exclude_keys = None, faf_threshold, seed = 42, limit = None)
+#       for gene, path in gnomAD_csv_paths.items()
+#   ]
+#   gnomAD_rows = pd.concat(gnomAD_frames, ignore_index= True ) if gnomAD_frames else pd.DataFrame()
+#  combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
+#  combined.to_csv(out_path, index = False)
+#  print(f"Combined Dataset: {len(combined)} total sequences")
+#  print(combined["label"].value_counts())
+#  return combined
