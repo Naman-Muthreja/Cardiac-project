@@ -485,7 +485,8 @@ def build_full_dataset(clinvar_dataset_path, clinvar_raw_path, gnomAD_csv_paths,
 
         # Prints the amount of variants per label, and a crosstab.
         print(combined["label"].value_counts())
-        print(pd.crosstab([combined["gene"]], combined["consequence"], combined["label"]).to_string())
+        print(pd.crosstab([combined["gene"], combined["consequence"]], combined["label"]).to_string())
+
 
         return combined
 
