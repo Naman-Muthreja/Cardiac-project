@@ -99,11 +99,12 @@ def label_row(gene, clinsig, name ):
         
         # If pathogenic but not TTN, return what gene caused it to be pathogenic (missense mutations)
         return GENE_TO_CLASS[gene]
+    
     if is_benign:
         return "Benign"
     return None 
 
-def fetch_sequence(chrom, pos, timeout=8, max_retries=2):
+def fetch_sequence(chrom, pos, timeout=12, max_retries=3):
 
     # Makes sure that the position of the variant is exactly the half way point
     start = pos - HALF
@@ -131,6 +132,7 @@ def fetch_sequence(chrom, pos, timeout=8, max_retries=2):
             time.sleep(2+attempt*2)
             continue 
 
+        # Terminates the for loop after running these checks
         break 
 
     # If something like a 404 error comes up, return None.
@@ -230,11 +232,11 @@ def build_ClinVar_dataset(ClinVar_path, out_path, limit=None, old_frac=0.0, new_
         if mutant is None:
             continue
 
-        # Appends all the data needed about the variant, which will be later merged with gnomAD
+        # Appends all the data needed about the variant, which will be later merged with gnomAD. 
         rows.append(
             {
                 "sequence": mutant, "label": label, "gene": row["GeneSymbol"],
-                "pos": pos, "consequence": parse_consequence(str(row["Name"])),  "ref_sequence": seq, "chrom": chrom, "ref": ref, "alt": alt,
+                "pos": pos, "consequence": parse_consequence(str(row["Name"])), "chrom": chrom, "ref": ref, "alt": alt,
                 "name": row["Name"],
             }
         )
@@ -317,7 +319,7 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
         print(f"[{gene}] dropped {before - len(df)} rows already in ClinVar")
 
     
-    # If the Filtering allele frequency is greater than 0.001, keep the variant (benign needed only)
+    # If the Filtering allele frequency is greater than 1e-6, keep the variant 
     # Fills missing values with 0(which won't work) with fillna. Also converts text to numbers
     df["Allele Frequency"] = pd.to_numeric(df["Allele Frequency"], errors="coerce")
     df = df[df["Allele Frequency"].fillna(0) > faf_threshold]
@@ -407,7 +409,7 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
         rows.append(
             {
                 "sequence": mutant, "label": "Benign", "gene": gene,
-                "pos": pos, "consequence": row["consequence"], "af": float(row["Allele Frequency"]), "chrom": chrom, "ref": ref, "alt": alt,
+                "pos": pos, "consequence": row["consequence"], "af": float(row["Allele Frequency"]), "chrom": chrom, "ref": ref, "ref_sequence": seq, "alt": alt,
                 "name": "",
             }
         )
@@ -442,7 +444,19 @@ def build_full_dataset(clinvar_dataset_path, clinvar_raw_path, gnomAD_csv_paths,
         clinvar_all["AlternateAlleleVCF"].astype(str)))
     print(f"Exclusion set holds {len(clinvar_keys)} ClinVar variants")
 
-    gnomaAD_frames = []
+    # This adds the ref_sequence to the ClinVar data as well as the gnomAD data. Note that the ClinVar data was already built at the time of 
+    # writing this line, which is why a simple append does not work, unlike gnomAD. It returns the refercence sequence as the bps before
+    # the variant, the SNV, and the bps after.
+    if "ref_sequence" not in ClinVar_rows.columns:
+        ClinVar_rows["ref_sequence"] = (ClinVar_rows["sequence"].str[:HALF] +
+                                         ClinVar_rows["ref"].astype(str) + ClinVar_rows["sequence"].str[HALF + 1:])
+
+        # Returns how many ClinVar rows this function built ref_sequence for, by summing up the amount of reference sequences that did not 
+        # match up with the window of base pairs.
+        irregular = int((ClinVar_rows["ref_sequence"].str.len() != WINDOW).sum())
+        print(f"Rebuilt ref_sequence for ClinVar rows ({irregular} wrong length)")
+
+    gnomAD_frames = []
     # .items() returns a key-value pair, which respectively gets defined as gene and path. Path is each of the three gnomAD files.
     for gene, path in gnomAD_csv_paths.items():
 
@@ -452,43 +466,46 @@ def build_full_dataset(clinvar_dataset_path, clinvar_raw_path, gnomAD_csv_paths,
 
         # Appends what returns after calling build_gnomAD_benign to gnomAD_frames. Uses the "targets" parameter to return the correct amount
         # for each consequence. Path is defined from the for loop, and runs iteratively through all 3 file paths.
-        gnomaAD_frames.append(build_gnomAD_benign(path, gene, targets, exclude_keys = clinvar_keys,
+        gnomAD_frames.append(build_gnomAD_benign(path, gene, targets, exclude_keys = clinvar_keys,
                                                    faf_threshold = faf_threshold, seed = seed, limit = limit))
         
-        # Concatenates the 3 tables (one per class) to one single table called gnomAD_rows
-        gnomAD_rows = pd.concat(gnomaAD_frames, ignore_index=True) 
+    # Redefining gnomAD_frames to make sure that there are no empty data frames
+    gnomAD_frames = [f for f in gnomAD_frames if len(f) > 0]
 
-        # Makes the source of ClinVar_rows "ClinVar", that way, I can look at the final dataset to see if a variant originates from ClinVar.
-        if len(gnomAD_rows) > 0:
-            gnomAD_rows["source"] = "gnomAD"
+    # Concatenates the threee tables in gnomAD_frames into a single data frame with variants from all 3 genes
+    gnomAD_rows = pd.concat(gnomAD_frames, ignore_index=True) if gnomAD_frames else pd.DataFrame()
 
-        # Combines the ClinVar dataset and gnomAD dataset into one
-        combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
+    # Makes the source of ClinVar_rows "ClinVar", that way, I can look at the final dataset to see if a variant originates from ClinVar.
+    if len(gnomAD_rows) > 0:
+        gnomAD_rows["source"] = "gnomAD"
 
-        # I make sure to convert the ClinVar chrom, ref, alt to a string so it matches gnomAD's format. 
-        # For example, the number 14 becomes the string "14".
-        for c in ["chrom", "ref", "alt"]:
-            combined[c] = combined[c].astype(str)
+    # Combines the ClinVar dataset and gnomAD dataset into one
+    combined = pd.concat([ClinVar_rows, gnomAD_rows], ignore_index= True)
 
-        # To ensure the two datasets can match in format when checking for duplicates, I ensure “pos” is an integer. This makes sure
-        # that 235 and 235.0 are still regarded as the same position. Na is -1 to prevent errors from occuring (like with NaN).
-        combined["pos"] = pd.to_numeric(combined["pos"], errors = "coerce").fillna(-1).astype(int)
+    # I make sure to convert the ClinVar chrom, ref, alt to a string so it matches gnomAD's format. 
+    # For example, the number 14 becomes the string "14".
+    for c in ["chrom", "ref", "alt"]:
+        combined[c] = combined[c].astype(str)
 
-        # Removes matchups between gnomAD and ClinVar of the built dataset, using drop_duplicates(), keeping only the first of each duplicate.
-        before = len(combined)
-        combined = combined.drop_duplicates(subset=["chrom", "pos", "ref", "alt"], keep ="first")
+    # To ensure the two datasets can match in format when checking for duplicates, I ensure “pos” is an integer. This makes sure
+    # that 235 and 235.0 are still regarded as the same position. Na is -1 to prevent errors from occuring (like with NaN).
+    combined["pos"] = pd.to_numeric(combined["pos"], errors = "coerce").fillna(-1).astype(int)
 
-        # Saves the data, prints the amount of duplicate variants and variants saved.
-        print(f"\nDropped {before - len(combined)} duplicate variants")
-        combined.to_csv(out_path, index=False)
-        print(f"Saved {len(combined)} rows to {out_path}")
+    # Removes matchups between gnomAD and ClinVar of the built dataset, using drop_duplicates(), keeping only the first of each duplicate.
+    before = len(combined)
+    combined = combined.drop_duplicates(subset=["chrom", "pos", "ref", "alt"], keep ="first")
 
-        # Prints the amount of variants per label, and a crosstab.
-        print(combined["label"].value_counts())
-        print(pd.crosstab([combined["gene"], combined["consequence"]], combined["label"]).to_string())
+    # Saves the data, prints the amount of duplicate variants and variants saved.
+    print(f"\nDropped {before - len(combined)} duplicate variants")
+    combined.to_csv(out_path, index=False)
+    print(f"Saved {len(combined)} rows to {out_path}")
+
+    # Prints the amount of variants per label, and a crosstab.
+    print(combined["label"].value_counts())
+    print(pd.crosstab([combined["gene"], combined["consequence"]], combined["label"]).to_string())
 
 
-        return combined
+    return combined
 
 # LEGACY build_full_dataset, which was used the first time
 # def build_full_dataset(clinvar_dataset_path, gnomAD_csv_paths, out_path, faf_threshold = 1e-6):
