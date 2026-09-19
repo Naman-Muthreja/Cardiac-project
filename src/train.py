@@ -1,4 +1,4 @@
-""" 
+"""
 train.py is the script responsible for training the CNN to optimize prediction accuracy. It also conducts the validation and test
 data, using analysis methods like AUC-ROC and F1 scores.
 """
@@ -20,30 +20,39 @@ from model import CardiacCNN
 LABELS = ["HCM", "DCM", "Benign"]
 LABELS_TO_INDEX = {label:idx for idx, label in enumerate(LABELS)}
 
-# Counts the amount of DCM and HCM cases, and then caps the amount of benign variants
-# based on that amount, so that capping the # of benign variants works for smaller datasets too. 
 
-def cap_benign(df, max_benign = None, seed = 42):
+# Makes the # of benign variants match with the amount of pathogenic variants 1:1, also removing synonymous variants. This is so
+# a model cannot just use simple guessing rules to inflate accuracy
+def match_cells(df, ratio = 1.0, seed = 42, verbose = True):
 
-    # Counts the total number of pathogenic variants
-    counts = df["label"].value_counts()
-    total_pathogenic = counts.get("HCM", 0) + counts.get("DCM", 0)
+    kept = []
+    # Defines the genes and consequence from the dataset, and stores the rows in cells.
+    for (gene, cons), cell in df.groupby(["gene", "consequence"]):
 
-    # Makes # benign variants 4 times HCM and DCM combined, because benignity is more common
-    # than HCM and DCM. However, the previous amount of benign variants could cause data biases.
-    if max_benign is None:
-        max_benign = 4 * total_pathogenic
+         # Pathogenic and benign are the subsets of cell that don't match and match with the benign label, respectively.
+         pathogenic = cell[cell["label"] != "Benign"]
+         benign = cell[cell["label"] == "Benign"]
 
-    benign = df[df["label"] == "Benign"]
-    other = df[df["label"] != "Benign"]
+        # Doesn't use cells wih 0 pathogenic or 0 benign variants
+         if len(pathogenic) == 0 or len(benign) == 0:
+             if verbose:
+                 print(f"Dropped {gene}/{cons}: {len(pathogenic)} pathogenic, {len(benign)} benign")
+             continue
 
-    # Caps the number of benign variants
-    if len(benign) > max_benign:
-        benign = benign.sample(n = max_benign, random_state = seed)
+         # Makes the number of pathogenic variants and benign variants to be of a ratio of each other. This drops synonymous variants because
+         # there are no pathogenic synonymous variants
+         n_pathogenic = min(len(pathogenic), int(len(benign) / ratio))
+         n_benign = round(ratio*n_pathogenic)
+         
+         # Appends the pathogenic and benign variants
+         kept.append(pathogenic.sample(n = n_pathogenic, random_state = seed))
+         kept.append(benign.sample(n = n_benign, random_state = seed))
 
-    capped = pd.concat([other, benign], ignore_index=True)
-    print(f"Benign capped: {len(capped)}")
-    return capped
+    # Concats the list of dfs from kept
+    out = pd.concat(kept, ignore_index= True)
+    return out
+
+
 # makes the test splits
 def make_splits(df, seed = 42):
 
@@ -68,7 +77,12 @@ def prepare_tensors(df):
 # Defines train_model, with several important parameters. 
 def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 42, max_benign = None, evaluate_test = True):
 
-    df = cap_benign(df, max_benign=max_benign, seed=seed)
+    # Validates the number of benign variants equals the number of pathogenic variants, assert stops the program if the
+    # pathogenic variants count don't match benign
+    for (gene, cons), cell in df.groupby(["gene", "consequence"]):
+        n_path = (cell["label"] != "Benign").sum()
+        n_ben  = (cell["label"] == "Benign").sum()
+        assert n_path == n_ben, (f"{gene}/{cons} has {n_path} pathogenic and {n_ben} benign. ")
 
     # Tries to use GPU before going to CPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -124,11 +138,11 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
         # torch.no_grad() disables gradient calculation to speed up computation
         with torch.no_grad():
 
-            # x batch is the sequence, y is the label (see prepare_tensors)
+            # x batch is the sequence, y batch is the label (see prepare_tensors)
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
 
-                # Sets preds as the index of the highest prediction score a class got. Uses softmax to turn logits to probabilities
+                # Sets preds as the index of the highest prediction score a class got. Uses softmax to turn logits to probabilities.
                 # For example, a benign variant would most likely have the highest score be from the benign class, so the output would be 2.
                 preds = model(xb).argmax(dim=1)
 

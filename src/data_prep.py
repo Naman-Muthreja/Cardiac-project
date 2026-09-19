@@ -402,10 +402,6 @@ def build_gnomAD_benign(gnomAD_csv_path, gene, targets, exclude_keys = None, faf
         if mutant is None:
             continue
 
-        # Outputs the information about the variant
-        # Note: gnomAD does not have clinical labeling, but I assume benignity, due
-        # to the filtering I conducted.
-
         rows.append(
             {
                 "sequence": mutant, "label": "Benign", "gene": gene,
