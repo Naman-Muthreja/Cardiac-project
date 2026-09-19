@@ -101,8 +101,8 @@ def run(dataset_path, seed = 42):
 
     # Whole dataset data metrics returned
     print(f"WHOLE DATASET")
-    print(f"Genetic-code rule (path vs benign) : {genetic_code_baseline(matched):.4f}   <-- MUST be 0.5000")
-    print(f"Gene-name rule    (path vs benign) : {gene_only_pathogenic(matched, matched):.4f}   <-- MUST be 0.5000")
+    print(f"Genetic-code rule (path vs benign) : {genetic_code_baseline(matched):.4f}")
+    print(f"Gene-name rule    (path vs benign) : {gene_only_pathogenic(matched, matched):.4f} ")
     print(f"Stop-codon rule   (DCM vs rest)    : {stop_codon_baseline(matched):.4f}")
     print(f"Train-to-test rule(fit scores vs test scores): {gene_only_hcm_dcm(matched, matched):.4f}")
 
