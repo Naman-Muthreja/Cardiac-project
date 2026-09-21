@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 from consequence import parse_consequence
-from train import make_splits, match_cells
+from train import make_region_splits, match_cells
 
 # Adds the consequence column to a copied dataframe, which is later used to validate that the metrics are calculated on a dataframe with a variety of 
 # consequences. If the amount of consequences on a particular label are heavily one-sided, this favors the lookup table. The inverse favors a well
@@ -97,7 +97,7 @@ def run(dataset_path, seed = 42):
     matched = match_cells(df, seed = seed)
 
     # Inherits match_cells from "matched" too, makes the dfs.
-    fit_df, val_df, score_df, demo_df = make_splits(matched, seed = seed)
+    fit_df, val_df, score_df, demo_df = make_region_splits(matched, seed = seed)
 
     # Whole dataset data metrics returned
     print(f"WHOLE DATASET")

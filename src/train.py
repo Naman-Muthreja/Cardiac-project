@@ -11,7 +11,6 @@ import torch.nn as nn
 # Importing the data analysis methods
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.model_selection import train_test_split
 
 from encoding import encode_dataset
 from model import CardiacCNN
@@ -19,6 +18,8 @@ from model import CardiacCNN
 # Intializes the 3 classes, and assigns a unique index position for each one
 LABELS = ["HCM", "DCM", "Benign"]
 LABELS_TO_INDEX = {label:idx for idx, label in enumerate(LABELS)}
+
+WINDOW = 201
 
 
 # Makes the # of benign variants match with the amount of pathogenic variants 1:1, also removing synonymous variants. This is so
@@ -53,20 +54,104 @@ def match_cells(df, ratio = 1.0, seed = 42, verbose = True):
     return out
 
 
-# makes the test splits
-def make_splits(df, seed = 42):
+# Splits by genomic region instead of by row. Two variants 50 bases apart have
+# 201-base windows that overlap, so under a random split one can land in train and the other in test, and the
+# model has effectively already seen the test sequence. Block size is the size of each block used for the splitting of the genes.
+def make_regions_split (df, block_size = 3000, seed = 42, test_frac = 0.15, val_frac = 0.15, demo_frac = 0.02, verbose=True ):
 
- # The first thing this returns is the rest_df, and the second is the demo_df (which is 2% of the total data, for demo purposes)
-        rest_df, demo_df = train_test_split(df, test_size = 0.02, stratify = df["label"], random_state = seed)
+    rng = np.random.default_rng(seed)
+    df = df.copy()
 
-        # I want test_df to be 10% of the ORIGINAL data, not 10% of what is left. rest_df is 98% of the original,
-        # so 0.10/0.98 of rest_df works out. Also implements data stratification so that the amount of variants in each split is balanced.
-        train_val_df, test_df = train_test_split(rest_df, test_size = 0.10/0.98, stratify = rest_df["label"], random_state = seed)
+    # Defines block to be the gene name plus the position divided by the block_size. Returns the chunk number for each gene.
+    df["block"] = df["gene"].astype(str) + "_" + (df["pos"]//block_size).astype(str)
 
-        # train_val_df is 88% of the original, so 0.20/0.88 of it is 20% of the original, leaving 68% to train on.
-        train_df, val_df = train_test_split(train_val_df, test_size = 0.20/0.88, stratify = train_val_df["label"], random_state = seed)
+    # Defines offset to be the modulus of pos divided by block_size, tells you how far into a chunk a variant sits
+    offset = df["pos"] % block_size
+
+    # Near edge is defined as when the variant is sitting less far along than 201 base pairs, from either back or front.
+    df["near_edge"] = (offset < WINDOW) | (offset >= block_size - WINDOW)
+
+    assign = {}
+
+    # For each gene, and the its contents/columns, get the genes in sorted order based on gene type and position, and 
+    # then shuffle them
+    for gene, gene_rows in df.groupby("gene"):
+        blocks = np.array(sorted(gene_rows["block"].unique()))
+        rng.shuffle(blocks)
+        n=len(blocks)
+
+        # Splits the dataframe using each split's respective fraction and the length of blocks
+        n_demo = max(1, round(demo_frac * n))
+        n_test = max(1, round(test_frac * n))
+        n_val = max(1, round(val_frac * n))
+
+        # Apply labels "demo", "test", "val", and "train" to the "assign" dictionary, using previously defined sizes for 
+        # how many variants should be in each dataset.
+        for i, b in enumerate(blocks):
+            if i < n_demo:
+                assign[b] = "demo"
+            elif i < n_demo + n_test:
+                assign[b] = "test"
+            elif i < n_demo + n_test + n_val:
+                assign[b] = "val"
+            else:
+                assign[b] = "train"
+
+        # Defines the split column to be block mapped to assign (returns the label of the dataframe each variant is in)
+    df["split"] = df["block"].map(assign)
+
+    # Drops variants that are near the edge and keeps training rows, then records the number of variants dropped. I keep 
+    # all training rows, because the 201 base pairs rule from before already makes sure that test variants and training variants
+    # don’t overlap, so applying the same rule to the training rows would unnecessarily throw away data
+    before = len(df)
+    df = df[(~df["near_edge"] | (df["split"] == "train"))]
+    n_dropped = before - len(df)
+
+    # Makes each individual dataframe as well, deletes unneccesary columns from the final CSV
+    scratch = ["block", "near_edge", "split"]
+    demo_df = df[df["split"] == "demo"].drop(columns=scratch).reset_index(drop = True)
+    train_df = df[df["split"] == "train"].drop(columns = scratch).reset_index(drop = True)
+    val_df = df[df["split"] == "val"].drop(columns = scratch).reset_index(drop = True)
+    test_df = df[df["split"] == "test"].drop(columns = scratch).reset_index(drop = True)
+
+    # Prints out useful data collected by this function for data interpretability
+    if verbose:
+        print(f"Region split: {df['block'].nunique()} blocks of {block_size} bases")
+        print(f"{n_dropped} edge variants dropped from test/val/demo")
+        print(f"{n_dropped/before*100:.1f}%, zero from train")
+
+        # For each dataset, print out the number of rows, the percentage of the total dataframe that specific dataset covers, and
+        # how many of each label (HCM, DCM, Benign) it contains
+        for name, part in [("train",train_df), ("val",val_df), ("test",test_df), ("demo",demo_df)]:
+            print(f"{name:6s} {len(part):5d} rows ({len(part)/len(df)*100:4.1f}%)")
+            print(f"{dict(part['label'].value_counts())}")
 
         return train_df, val_df, test_df, demo_df
+
+# Takes the minimum gap between two variants, later to be compared with window to see if make_regions_split is working
+def min_gap(a_df, b_df):
+
+    # For the each set of genes, if the length is 0, move on
+    worst = np.inf
+    for g in set(a_df["gene"]) & set(b_df["gene"]):
+        a = np.sort(a_df[a_df["gene"] == g]["pos"].values)
+        b = np.sort(b_df[b_df["gene"] == g]["pos"].values)
+        if len(a) == 0 or len(b) == 0:
+            continue
+
+        # Searchsorted finds where each 'a' position would fit in sorted 'b', allowing us to check the nearest 'b' positions.
+        idx = np.searchsorted(b, a)
+
+        # Iteratively finds potential candidates, assigns the minimum gap as the "worst" gap.
+        for i, p in zip(idx, a):
+            candidates = []
+            if i > 0:
+                candidates.append(abs(p - b[i - 1]))
+            if i < len(b):
+                candidates.append(abs(p - b[i]))
+            if candidates:
+                worst = min(worst, min(candidates))
+    return worst
 
 # One hot encodes the dataset(X), and then returns the unique index for each label(Y)
 def prepare_tensors(df):
@@ -75,8 +160,9 @@ def prepare_tensors(df):
     return X,y
 
 # Defines train_model, with several important parameters. 
-def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 42, max_benign = None, evaluate_test = True):
+def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 42, evaluate_test = True):
 
+    
     # Validates the number of benign variants equals the number of pathogenic variants, assert stops the program if the
     # pathogenic variants count don't match benign
     for (gene, cons), cell in df.groupby(["gene", "consequence"]):
@@ -89,8 +175,13 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
 
 
     # Calls the make_splits function
-    train_df, val_df, test_df, demo_df = make_splits(df, seed = seed)
+    train_df, val_df, test_df, demo_df = make_regions_split(df, seed = seed)
 
+    # Stop the program if the minimum gap is less than window, which is 201, meaning that DNA windows overlap
+    gap = min_gap(test_df, train_df)
+    assert gap >= WINDOW, f"test and train are only {gap} bases apart, windows overlap"
+    print(f"min gap test <-> train: {gap:.0f} bases (need >= {WINDOW})")
+    
 
     #One hot encodes the splits
     X_train, y_train = prepare_tensors(train_df)
