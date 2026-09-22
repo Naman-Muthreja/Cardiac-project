@@ -57,7 +57,7 @@ def match_cells(df, ratio = 1.0, seed = 42, verbose = True):
 # Splits by genomic region instead of by row. Two variants 50 bases apart have
 # 201-base windows that overlap, so under a random split one can land in train and the other in test, and the
 # model has effectively already seen the test sequence. Block size is the size of each block used for the splitting of the genes.
-def make_regions_split (df, block_size = 3000, seed = 42, test_frac = 0.15, val_frac = 0.15, demo_frac = 0.02, verbose=True ):
+def make_regions_split (df, block_size = 3000, seed = 1, test_frac = 0.15, val_frac = 0.15, demo_frac = 0.02, verbose=True ):
 
     rng = np.random.default_rng(seed)
     df = df.copy()
@@ -126,7 +126,7 @@ def make_regions_split (df, block_size = 3000, seed = 42, test_frac = 0.15, val_
             print(f"{name:6s} {len(part):5d} rows ({len(part)/len(df)*100:4.1f}%)")
             print(f"{dict(part['label'].value_counts())}")
 
-        return train_df, val_df, test_df, demo_df
+    return train_df, val_df, test_df, demo_df
 
 # Takes the minimum gap between two variants, later to be compared with window to see if make_regions_split is working
 def min_gap(a_df, b_df):
