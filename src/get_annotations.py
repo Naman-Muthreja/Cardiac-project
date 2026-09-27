@@ -1,5 +1,6 @@
 """
-get_annotations.py  takes in two tables that give the model biological knowledge to be able to make better predictions. ...
+get_annotations.py  takes in two tables that give the model biological knowledge to be able to make better predictions, 
+specifically by downloading ex
 """
 import json
 import os

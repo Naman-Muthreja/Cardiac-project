@@ -1,5 +1,5 @@
 """
-Annotate.py fetches REVEL and CADD Binary AUC-ROC scores for comparison with my model. Annotation in genomics means to attatch
+Revel_cadd_bench fetches REVEL and CADD Binary AUC-ROC scores for comparison with my model. Annotation in genomics means to attatch
 extra information to a variant previously unknown, hence the script's name.
 """
 
