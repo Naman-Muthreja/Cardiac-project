@@ -421,27 +421,18 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
         val_binary_auc = roc_auc_score(val_y_binary, val_pathogenic_prob)
         print(f"[VALIDATE] Binary Pathogenic-vs-Benign AUC-ROC: {val_binary_auc:.3f}")   
 
-        # Accuracy and AUC-ROC finding for training is very similar
+        # Accuracy and AUC-ROC finding for training is very similar to validate
         train_logits = model(X_train.to(device))
-
         train_probs = torch.softmax(train_logits, dim =1).cpu().numpy()
-
         train_preds = train_logits.argmax(dim=1).cpu() 
-
         train_acc = (train_preds == y_train).float().mean().item()
-
         print(f"\nFinal train accuracy: {train_acc * 100:.3f}")
-
         train_ovr_auc = roc_auc_score(y_train.numpy(), train_probs, multi_class="ovr", average = "macro")
         print(f"[TRAIN] Three-class macro one-vs-rest AUC-ROC: {train_ovr_auc:.3f}")
-
         benign_idx = LABELS.index("Benign")
         train_y_binary = (y_train.numpy() != benign_idx).astype(int)
-
         train_pathogenic_prob = 1.0 - train_probs[:, benign_idx]
-
         train_binary_auc = roc_auc_score(train_y_binary, train_pathogenic_prob)
-
         print(f"[TRAIN] Binary Pathogenic-vs-Benign AUC-ROC: {train_binary_auc:.3f}")        
 
     # If evaluate_test is false, just return the model weights without doing the final test.
@@ -452,27 +443,16 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
     # Finding AUC-ROC and accuracy for test is very similar to train and validation
     with torch.no_grad():
 
-       
+        # Finds the test_logits, converts to probabilities, gives predictions, computes accuracy and AUC for the test
         test_logits = model(X_test.to(device))
-
-
         test_probs = torch.softmax(test_logits, dim =1).cpu().numpy()
-
-        
         test_preds = test_logits.argmax(dim=1).cpu() 
-
-       
         test_acc = (test_preds == y_test).float().mean().item()
-
-       
         print(f"\nFinal test accuracy: {test_acc * 100:.3f}")
-
-        
         test_ovr_auc = roc_auc_score(y_test.numpy(), test_probs, multi_class="ovr", average = "macro")
-
         print(f"Three-class macro one-vs-rest AUC-ROC: {test_ovr_auc:.3f}")
 
-        
+        # Labels benign and pathogenic
         benign_idx = LABELS.index("Benign")
         test_y_binary = (y_test.numpy() != benign_idx).astype(int)
 
@@ -482,7 +462,6 @@ def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
 
         # Calculates binary AUC-ROC score
         test_binary_auc = roc_auc_score(test_y_binary, pathogenic_prob)
-
         print(f"Binary Pathogenic-vs-Benign AUC-ROC: {test_binary_auc:.3f}")
 
         # Prints the classification report, with various data analysis methods like 

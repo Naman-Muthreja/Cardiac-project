@@ -65,7 +65,7 @@ def fetch_revel_score(chrom, pos, ref, alt, assembly = "hg38"):
     revel_returned_data = r.json()
 
     
-    # Checks if the returned data is a dictorionary, and gets the dbnsfp key
+    # Checks if the returned data is a dictionary, and gets the dbnsfp key
     dbnsfp = revel_returned_data.get("dbnsfp",{}) if isinstance(revel_returned_data, dict) else {}
 
     # Checks specifially for REVEL data from dbnsfp
