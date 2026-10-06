@@ -147,9 +147,9 @@ def load_ttn_exons(ann_dir = ANN_DIR):
         "low": low,
         "high": high,
         "psi_dcm": (v["psi_dcm"] or 0) / 100,    # Percent Spliced In (How important it is for the heart)
-        "psi_gtex": (v["psi_gtex"] or 0) / 100,
+        "psi_gtex": (v["psi_gtex"] or 0) / 100,  # Normal hearts to serve as comparison
         "region": v["region"] or "none",
-        "in_n2ba": float(iso[1] != "-"),  # These != checks as True make it 1.0
+        "in_n2ba": float(iso[1] != "-"),  # The != checks as True return a value of 1.0
         "in_n2b": float(iso[2] != "-"),
         "in_n2a": float(iso[3] != "-"),
         "in_novex3": float(iso[6] != "-")
@@ -183,9 +183,8 @@ def grantham(a,b):
     c1, p1, v1 = GRANTHAM[a]
     c2, p2, v2 = GRANTHAM[b]
     
-    # Weighted squared differences (
-    # Each weight = 1 / (average difference of that property over all 190 amino acid pairs)^2,
-    #   composition: avg 0.7394 -> 1/0.7394^2 = 1.829 (published 1.833)
+    # Each weight = 1 / (average difference of that property over all 190 amino acid pairs)^2
+    #   composition: avg 0.7394 -> 1/0.7394^2 = 1.829 
     #   polarity:    avg 3.134  -> 1/3.134^2  = 0.1018
     #   volume:      avg 50.06  -> 1/50.06^2  = 0.000399
     total = 1.833 * (c1 - c2) ** 2 + 0.1018 * (p1 - p2) ** 2 + 0.000399 * (v1 - v2) ** 2
@@ -341,21 +340,21 @@ def build(df, groups = ALL_GROUPS, ann = None, gene_span = None):
 
     # Defines an empty dataframe called "X" and attributes the label is_ttn to all genes that are TTN.
     X = pd.DataFrame(index = df.index)
-    is_ttn = (df["gene"] = "TTN").to_numpy()
+    is_ttn = (df["gene"] == "TTN").to_numpy()
 
     # Finds gene and consequence
     if "base" in groups:
         # Checks if a variant corresponds to a gene, and does so for all 3 genes, outputting "1.0" for a truth
         # statement match (one truth value match per row)
-        for g in ["MYH7", "MYBPC3", "TTN"]: X[f"g_"{g}] = (df["gene"] == g).astype(float)
+        for g in ["MYH7", "MYBPC3", "TTN"]: X[f"g_{g}"] = (df["gene"] == g).astype(float)
 
         # Similar encoding process, but for conseqeunces
         for c in ["missense", "nonsense", "noncoding"]:
             X[f"c_{c}"] = (df["consequence"]  == c).astype(float)
 
-    # Using the gene name and the dataframe containing the variants, find the minimum and maximum variant positions.
-    if gene_span is None:
-        gene_span = {g:(d["pos"].min(), d["pos"].max()) for g, d in df.groupby("gene")}
+        # Using the gene name and the dataframe containing the variants, find the minimum and maximum variant positions.
+        if gene_span is None:
+            gene_span = {g:(d["pos"].min(), d["pos"].max()) for g, d in df.groupby("gene")}
 
         # First output of "g" is the minimum value, second output is the maximum value
         low = df["gene"].map(lambda g: gene_span[g][0])
@@ -364,6 +363,7 @@ def build(df, groups = ALL_GROUPS, ann = None, gene_span = None):
         # Normalized position of the variant from 0 to 1. Does so by dividing how far the variant is from the end of the gene
         # by the total length of the gene.
         relative = ((high - df["pos"]) / (high-low)).to_numpy()
+        X["rel_pos"] = relative
         for g in ["MYH7", "MYBPC3", "TTN"]:
             X[f"rel_{g}"] = np.where(df["gene"] == g, relative, -1.0)
 
@@ -377,15 +377,14 @@ def build(df, groups = ALL_GROUPS, ann = None, gene_span = None):
         transitions = {("A", "G"), ("G", "A"), ("C", "T"), ("T", "C")}
         X["transition"] = [float((a, b) in transitions) for a, b in zip(df["ref"], df["alt"])]
 
-        # CpG variants are 10x more likely to be in a population. They occur when G follow C, which I check for
-        # on both strands here.
+        # CpG variants are 10x more likely to be in a population. They occur when G follows C, and are 10 times more likely in a population.
         X["cpg"] = [float((s[100] == "C" and s[101] == "G") or (s[99] == "C" and s[100] == "G"))
                     for s in df["ref_sequence"]]
         
     # Finds details about the exon and position
     if "tx" in groups:
         # Takes important data from annotate() and makes it a NumPy table, with label tx (transcript)
-        for c in ["exon_frac", "last_exon", "intronic", "in_cds", "prot_frac", "nmd_escape"]:
+        for c in ["exon_frac", "last_exon", "intronic", "in_cds", "protein_frac", "nmd_escape"]:
             X[f"tx_{c}"] = ann[c].to_numpy()
 
         # Converts the intron_dist and exon_edge_dist from the annotate function into columns of the table
@@ -407,15 +406,15 @@ def build(df, groups = ALL_GROUPS, ann = None, gene_span = None):
                 col = ann[c] if c in ann else pd.Series(0.0, index = df.index)
 
                 # makes sure Non-TTN variants get “-1.0”, NaN values are filled with “0.0”, and TTN variants
-                # return their respective PSI score to indicate how important they are to the heart, with high scores indicating
+                # return their respective PSI score to indicate how important they are to the heart, with high scores indicating an increased chance of
                 # pathogenicity because an important exon has been disrupted.
                 X[f"ttn_{c}"] = np.where(is_ttn, col.fillna(0).astype(float), -1.0)
 
                 # TTN is a big gene that can be in a variety of regions of the muscle sarcomere, from the Z-disk to the M-band,
-                # so I return the region for each TTN gene.
-                region = ann["region"] if "region" in ann else pd.Series(None, index = df.index)
-                for reg in ["A-band", "I-band", "Z-disk", "M-band"]:
-                     X[f"ttn_{reg}"] = ((region == reg).to_numpy() & is_ttn).astype(float)
+                # so I return the region for each TTN variant's exon.
+            region = ann["region"] if "region" in ann else pd.Series(None, index = df.index)
+            for reg in ["A-band", "I-band", "Z-disk", "M-band"]:
+                X[f"ttn_{reg}"] = ((region == reg).to_numpy() & is_ttn).astype(float)
 
     # Finds detail about the amino acid swap, such as hydropathy and evolutionary data
     if "aa" in groups:
@@ -425,7 +424,7 @@ def build(df, groups = ALL_GROUPS, ann = None, gene_span = None):
         ok = [isinstance(a, str) and isinstance(b, str) and "*" not in (a,b) and a != b for a, b in zip(ra, aa)]
 
         # Converts all biological data from the annotate function, if matching the "ok" criteria
-        # For each column, uses an approximate scaling factor to keep the data from 0 to 1.
+        # For each column, uses an approximate scaling factor to keep the data in similar scales.
         X["aa_grantham"] = [ grantham(a, b) / 215 if k else 0.0  for a, b, k in zip(ra, aa, ok)]
         X["aa_blosum"] = [BLOSUM62[(a, b)] / 4 if k else 0.0 for a, b, k in zip(ra, aa, ok)]
         X["aa_hydro"] = [(HYDROPATHY[b] - HYDROPATHY[a]) / 9 if k else 0.0 for a, b, k in zip(ra, aa, ok)]
@@ -437,4 +436,3 @@ def build(df, groups = ALL_GROUPS, ann = None, gene_span = None):
 
     # Returns all of that data
     return X
-
