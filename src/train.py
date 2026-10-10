@@ -13,6 +13,7 @@ from sklearn.metrics import classification_report, confusion_matrix, roc_auc_sco
 from torch.utils.data import DataLoader, TensorDataset
 
 from encoding import encode_dataset
+from model_extra_features import annotate, build
 from model import CardiacCNN
 
 # Intializes the 3 classes, and assigns a unique index position for each one
@@ -200,7 +201,7 @@ def within_stratum_auc(df, probs, min_cell = 10, verbose = True):
         weighted_sum += auc * len(cell)
         total_weight += len(cell)
 
-    # Returns the weighted_sum over total_weight
+    # Finds the weighted_sum over total_weight
     overall = weighted_sum / total_weight
 
     # Returns important statistics, to 3 decimal places for numerical values
@@ -244,10 +245,260 @@ def bootstrap_auc(y_true, scores, n_boot = 2000, seed = 42):
     lower = out[int(0.025 * len(out))]
     upper = out[int(0.975 * len(out))]
     return float(np.mean(out)), float(lower), float(upper)
-    
 
-# Defines train_model, with several important parameters. 
-def train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 42, evaluate_test = True):
+# Binary AUC-ROC to compare against REVEL and CADD
+def binary_auc(y, probs):
+    benign_idx = LABELS_TO_INDEX["Benign"]
+    return roc_auc_score((np.asarray(y) != benign_idx).astype(int), 1.0 - probs[:, benign_idx])
+
+# Gets the feature table values for the model to use
+def make_features_tensors(train_dfs, dfs):
+
+     # Finds the lowest and highest genomic coordinates for each gene, to be used in build() for finding rel_pos
+     gene_span = {g: (d["pos"].min(), d["pos"].max()) for g, d in train_dfs.groupby("gene")}
+
+     # Builds the feature table, converting to NumPy
+     tables = [build(d, gene_span=gene_span).to_numpy(dtype = np.float32) for d in [train_dfs] + list(dfs)]
+
+     # Rescales to the mean and standard deviation, adding a very small amount to std so that errors don't occur when diving by
+     # std when std = 0
+     mean = tables[0].mean(axis=0)
+     std = tables[0].std(axis=0) + 1e-6
+
+    # Normalizes all the tables using the scale created by the training rows
+     return [torch.tensor((t - mean) / std) for t in tables]
+
+# Trains one CardiacCNN model, X is the DNA sequences and y is the labels
+def fit_one(X, features, y, epochs, batch_size, lr, weight_decay, seed, device):
+
+    # Sets the seed
+    torch.manual_seed(seed)
+
+    # Uses the CardiacCNN class from model, uses shape to find the number of input features in the feature branch.
+    model = CardiacCNN(n_features = features.shape[1]).to(device)
+
+    # Weights sets inverse-frequency class weights, so the smaller classes are not ignored. 
+    counts = np.bincount(y.numpy(), minlength = 3)
+    weights = torch.tensor(counts.sum() / (3 * np.maximum(counts, 1)), dtype = torch.float32).to(device)
+
+    # Sets criterion (compares predictions to answers) and optimizer (updates weights)
+    criterion = nn.CrossEntropyLoss(weight = weights)
+    optimizer = torch.optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+
+    # Arranges the rows
+    rows = np.arange(len(y))
+
+    # Puts the model in training mode for each epoch and shuffles the order of the variants.
+    for epoch in range(epochs):
+        model.train()
+        order = np.random.default_rng(seed * 100 + epoch).permutation(rows)
+
+        # Processes the rows "batch_size" amounts at a time, and trains the model
+        for i in range(0, len(order), batch_size):
+            b = order[i:i + batch_size]
+            optimizer.zero_grad()
+            loss = criterion(model(X[b].to(device), features[b].to(device)), y[b].to(device))
+            loss.backward()
+            optimizer.step()
+
+    # Returns after every epoch has ran
+    model.eval()
+    return model
+
+# Averages the class probabilities of several trained models, making sure that one model underperforming or overperforming by chance can't flaw the data metrics.
+def predict(models, X, features, device):
+    with torch.no_grad():
+
+        # Converts the activation scores to probabilities for each model, then moving the probabilities to the cpu and converting to numpy.
+        probs = [torch.softmax(m(X.to(device), features.to(device)), dim = 1).cpu().numpy() for m in models]
+    return np.mean(probs, axis = 0)
+
+def train_model(df, epochs = 80, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 49,
+                n_models = 3, evaluate_test = True):
+    
+    for (gene, cons), cell in df.groupby(["gene", "consequence"]):
+            n_path = (cell["label"] != "Benign").sum()
+            n_ben  = (cell["label"] == "Benign").sum()
+            assert n_path == n_ben, (f"{gene}/{cons} has {n_path} pathogenic and {n_ben} benign. ")
+    
+    # Tries to use GPU before going to CPU
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Calls the make_regions_splits function to split the datasets
+    train_df, val_df, test_df, demo_df = make_regions_split(df, seed = seed)
+    
+    # Stop the program if the minimum gap is less than window, which is 201, meaning that DNA windows overlap
+    gap = min_gap(test_df, train_df)
+    assert gap >= WINDOW, f"test and train are only {gap} bases apart, windows overlap"
+    print(f"min gap test <-> train: {gap:.0f} bases (need >= {WINDOW})")
+
+    # Prepares tensors and features
+    fit_df = pd.concat([train_df, val_df], ignore_index = True)
+    X_fit, y_fit = prepare_tensors(fit_df)
+    X_test, y_test = prepare_tensors(test_df)
+    F_fit, F_test = make_features_tensors(fit_df, [test_df])
+
+    # Returns amount of training/fitting rows and the counts of class for double checking
+    print(f"Fitting on {len(fit_df)} rows, {F_fit.shape[1]} features per row")
+    print("Counts of each class:", dict(zip(LABELS, np.bincount(y_fit.numpy(), minlength = 3).tolist())))
+
+
+    models = []
+    for k in range(n_models):
+
+        # Appends data found from fit_one to models
+        models.append(fit_one(X_fit, F_fit, y_fit, epochs, batch_size, lr, weight_decay, seed = k, device = device))
+
+        # Indices start from 0, so I add 1 to find the model number trained for a specific model
+        print(f"model {k + 1}/{n_models} trained")
+
+    # Uses the model probabilities to calculate fit binary AUC-ROC, should be high.
+    fit_probs = predict(models, X_fit, F_fit, device)
+    print(f"[FIT ROWS] Binary AUC: {binary_auc(y_fit.numpy(), fit_probs):.3f}")
+
+    if not evaluate_test:
+        return models, (X_test, F_test, y_test), demo_df, test_df
+
+    # Prints out several important metrics on the test
+    test_probs = predict(models, X_test, F_test, device)
+    test_preds = test_probs.argmax(axis = 1)
+    yt = y_test.numpy()
+    print(f"\nFinal test accuracy: {(test_preds == yt).mean() * 100:.3f}")
+
+    # Macro one-vs-rest AUC-ROC compares each class to all the others and averages, rather than benign vs pathogenic
+    print(f"Three-class macro one-vs-rest AUC-ROC: " f"{roc_auc_score(yt, test_probs, multi_class = 'ovr', average = 'macro'):.3f} ")
+
+    # Labels the benign indexes and pathogenic indices
+    benign_idx = LABELS_TO_INDEX["Benign"]
+    test_y_binary = (yt != benign_idx).astype(int)
+
+    # Pathogenic probability is 1- probability of benign
+    pathogenic_prob = 1.0 - test_probs[:, benign_idx]
+    print(f"Binary Pathogenic-vs-Benign AUC-ROC: {roc_auc_score(test_y_binary, pathogenic_prob):.3f}")
+
+    # Prints classifications report (precision, recall, F1 score) and confusion matrix (showing where confusions occured in the model)
+    print(classification_report(yt, test_preds, target_names = LABELS, zero_division = 0))
+    print(confusion_matrix(yt, test_preds))
+
+    # 95% confidence interval for binary AUC-ROC
+    m, low, high = bootstrap_auc(test_y_binary, pathogenic_prob)
+    print(f"\nBinary AUC 95% Confidence Interval: {low:.3f} to {high:.3f}")
+    within_stratum_auc(test_df, test_probs)
+
+    # Returns the models, test numbers, and test and demo dataframes
+    return models, (X_test, F_test, y_test), demo_df, test_df
+
+# Block folds makes 5 different folds from the 3000-base blocks and an empty fold array
+def block_folds(df, n_folds = 5, block_size = 3000, seed = 0):
+
+    rng = np.random.default_rng(seed)
+
+    # Concatenates the gene that the variant belongs to plus the position divided by block_size (like an ID)
+    block = df["gene"].astype(str) + "_" + (df["pos"] // block_size).astype(str)
+
+    # Creates the empty fold array
+    fold = np.full(len(df), -1)
+
+    # Finds blocks for each gene (one at a time so that variants per gene are distributed amongst the folds), sorts them in a set starting order,
+    #  and then shuffles them, removing duplicates too.
+    for gene in df["gene"].unique():
+        blocks = np.array(sorted(block[df["gene"] == gene].unique()))
+        rng.shuffle(blocks)
+
+        # I set the folds that each variant goes to, using modulo 5. For each block match, I find the remainder of the index divided by k, which is 5. 
+        # Therefore, based on index, variants are assigned to blocks 0,1,2,3,4. 
+        for i, b in enumerate(blocks):
+            fold[(block == b).to_numpy()] = i % n_folds
+
+    # Prevents a variant from being in two different genomic windows, and hence accidentally two different folds by removing those types of variants.
+    offset = df["pos"] % block_size
+    near_edge = ((offset < WINDOW) | (offset >= block_size - WINDOW)).to_numpy()
+
+    # Safety check: every row must get a fold. (A missing indent once left 636 rows at -1, and no error appeared.)
+    assert (fold >= 0).all(), f"{int((fold < 0).sum())} rows never got a fold"
+
+    return fold, near_edge
+
+# Cross validation divides the data into 5 folds and tests how well the model generalizes more accurately with the increased amount of variants.
+def cross_validate(df, split_seed = 49, cv_seeds = (0, 1, 2), n_folds = 5, epochs = 80, batch_size = 32,
+                   lr = 7e-4, weight_decay = 3e-4, skip_cells = ("MYBPC3/noncoding",), include_test = True,
+                   return_predictions = False):
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Divides into the genomic split regions, including the test dataset only if include_test is True
+    train_df, val_df, test_df, demo_df = make_regions_split(df, seed = split_seed, verbose = False)
+    parts = [train_df, val_df, test_df] if include_test else [train_df, val_df]
+    data = pd.concat(parts, ignore_index = True)
+
+    # Prepares the tensors (making the DNA sequence and the label for each)
+    X_all, y_all = prepare_tensors(data)
+    within, within_skip, binary = [], [], []
+    predictions = []
+
+    # Runs 3 complete cross validations, and calls block_folds to seperate each cross validation into 5 genomic blocks.
+    for cv_seed in cv_seeds:
+        fold, near_edge = block_folds(data, n_folds=n_folds, seed = cv_seed)
+        ws_sum, ws_n, skip_sum, skip_n, fold_binary = 0.0, 0, 0.0, 0, []
+
+        # For each fold being tested, train on the other 4 folds and then test on the fifth. I do this process 5 times (for 5 folds) in each complete cross validation
+        #  (3 cross validations means 15 tests total). To do this 5 times, for each process, I hide one fold for testing (ex:3) and train on the other folds (ex: 0,1,2,4)
+        for f in range(n_folds):
+
+            # Defines "fit" to not include the fold being tested, and "test" to be the rows in the current fold being tested, making sure to not score when a variant is near the edge.
+            fit = np.where(fold != f)[0]
+            test = np.where((fold == f) & (~near_edge))[0]
+
+            # Uses iloc to make fit and test dataframes.
+            fit_df = data.iloc[fit]
+            held_df = data.iloc[test].reset_index(drop = True)
+
+            # Builds the features for the model to use
+            features_fit, features_held = make_features_tensors(fit_df, [held_df])
+
+            # Trains one model, predicts probabilities on the test dataset, also returns within_stratum_auc.
+            model = fit_one(X_all[fit], features_fit, y_all[fit], epochs, batch_size, lr, weight_decay, seed = cv_seed * 10 + f, device = device)
+            probs = predict([model], X_all[test], features_held, device)
+            overall, per_cell = within_stratum_auc(held_df, probs, verbose = False)
+
+            # Calculates the number of variants and weighted sum
+            for cell, (auc, n) in per_cell.items():
+                ws_sum += auc * n
+                ws_n += n
+                if cell not in skip_cells:
+                    skip_sum += auc * n
+                    skip_n += n
+
+            # Appends binary AUC-ROC for each fold, prints the binary AUC-ROC for the most recent fold score (the current fold that was appended)
+            fold_binary.append(binary_auc(y_all[test].numpy(), probs))   
+            print(f"cv seed {cv_seed} fold {f}: binary {fold_binary[-1]:.3f}")
+
+            # Keeps every held-out prediction, so the benchmark can compare tools on exactly these rows
+            held_out = held_df[["chrom", "pos", "ref", "alt", "gene", "consequence", "label"]].copy()
+            held_out["cv_seed"], held_out["fold"] = cv_seed, f
+            held_out[["p_hcm", "p_dcm", "p_benign"]] = probs
+            predictions.append(held_out)
+
+        # For each cross-validation, appends the mean binary AUC-ROC score of each fold
+        binary.append(np.mean(fold_binary))
+        within.append(ws_sum / ws_n)
+        within_skip.append(skip_sum / skip_n)
+
+    # Prints once, after every seed and fold
+    print(f"\n5-fold block CV, {len(data)} rows, {len(cv_seeds)} CV seeds, scored per fold")
+    print(f"within-stratum AUC: {np.mean(within):.3f}  (spread across CV seeds {np.std(within):.3f})")
+    print(f"within-stratum AUC without {', '.join(skip_cells)}: {np.mean(within_skip):.3f}")
+    print(f"binary AUC: {np.mean(binary):.3f}")
+    if return_predictions:
+        return float(np.mean(within)), float(np.mean(within_skip)), float(np.mean(binary)), pd.concat(predictions, ignore_index = True)
+    return float(np.mean(within)), float(np.mean(within_skip)), float(np.mean(binary))
+
+
+
+
+
+# Old train_model script, unused now
+def old_train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 4, evaluate_test = True):
 
     torch.manual_seed(seed)
     # Validates the number of benign variants equals the number of pathogenic variants, assert stops the program if the
