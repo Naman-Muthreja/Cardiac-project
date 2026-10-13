@@ -8,7 +8,7 @@ import torch
 BASES = ["A", "C", "G", "T"]
 
 # Enumerates the bases with b (the string letter) as the key, and i as the value
-# Returns dictionary {"A" : 0, "C" : 1, "T" : 2, "G" :3}, to dedicate each base it's own coordinate
+# Returns dictionary {"A" : 0, "C" : 1, "G" : 2, "T" :3}, to dedicate each base it's own coordinate
 BASES_TO_INDEX = {b:i for i,b in enumerate(BASES)}
 
 def one_hot_encode(seq):

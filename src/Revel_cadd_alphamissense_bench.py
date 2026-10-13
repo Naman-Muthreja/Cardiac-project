@@ -72,7 +72,7 @@ def fetch_tool_scores(df, path = SCORES_PATH, batch_size = 500, refresh = False)
 
                 # Leaves loop if the attempt worked
                 break
-            # Except for these errors, check if the attempt is the third one (indexing at 0). If so, stop the program for that variant and wait for 5 seconds.
+            # Except for these errors, check if the attempt is the third one (indexing at 0). If so, try twice, and on the third, stop the program.
             except (requests.exceptions.RequestException, ValueError, KeyError):
                 if attempt == 2:
                     raise
@@ -82,7 +82,7 @@ def fetch_tool_scores(df, path = SCORES_PATH, batch_size = 500, refresh = False)
         assert set(chunk) <= set(hits), "MyVariant skipped some variants"
 
         # Appends the variant_id, score for a variant, and the tool-score pairs (Ex: revel : 0.71).
-        # Includes each model's prediction score for a variant (higher meaning more pathogenic).
+        # Includes each tool's prediction score for a variant (higher meaning more pathogenic).
         for variant_id in chunk:
             downloaded.append({
                 "id": variant_id,
@@ -116,7 +116,7 @@ def check_tool_scores(df, scores):
     print("Coverage (scored / total):")
     print(coverage.to_string())
 
-     # Finds non-missense variants and calculates the amount of "blanked" (unfilled scores) variants for REVEL and Alphamissense, which only score on missense variants.
+     # Finds non-missense variants and calculates the amount of "blanked" variants for REVEL and Alphamissense, which only score on missense variants.
     for tool in ["revel", "alphamissense"]:
         other = (d["consequence"] != "missense") & d[tool].notna()
         if other.any():
@@ -139,7 +139,7 @@ def check_tool_scores(df, scores):
         # Labels pathogenic scores as 1 and benign scores as 0, for each tool, then checks it with the answer key for the binary AUC-ROC
         auc = roc_auc_score((part["label"] != "Benign").astype(int), part[tool])
         print(f"Direction check, {tool} on {len(part)} missense: AUC {auc:.3f}")
-        assert auc > 0.5, f"something is wrong"
+        assert auc > 0.5, f"something is wrong because the AUC-ROC score is lower than 0.5"
     return d
 
 # VUS version of check_tool_scores
@@ -155,7 +155,7 @@ def tool_scores_for(df, path):
     print(d.groupby(["gene", "consequence"])[TOOLS].agg(lambda s: f"{s.notna().sum()}/{len(s)}").to_string())
     return d
 
-# Quickly finds the weighted auc
+# Finds the weighted AUC-ROC score
 def weighted_auc(true_labels, model_scores, weights):
         return float(roc_auc_score(true_labels, model_scores, sample_weight = weights))
 
@@ -165,7 +165,7 @@ def pieces(rows, by_cell = False):
     keys = ["cv_seed", "fold"] + (["gene", "consequence"] if by_cell else [])
     return [(key[0], idx) for key, idx in rows.groupby(keys).indices.items()]
 
-# Seperates the data into folds for cross-validation (to reduce variability in the data)
+
 # One important thing to keep in mind is that the cross-validation does not need a redefinition of how to assign the variants to a fold, or how big a fold is,
 # because I am using the cv_predictions csv built from my model in train.py as an input.
 def fold_auc(rows, score, by_cell=False, weight=None, min_rows=10, min_class=3, parts=None):
@@ -190,8 +190,15 @@ def fold_auc(rows, score, by_cell=False, weight=None, min_rows=10, min_class=3, 
         # Retrieves running totals (starting at 0.0)
         total, n = totals.get(seed, (0.0, 0.0))
 
-        # Calculates the weighted binary AUC-ROC for each seed
+        # Calculates the weighted binary AUC-ROC for each seed, multiplies each score by its weight, and also accumu
         totals[seed] = (total + weighted_auc(y, s, w) * w.sum(), n + w.sum())
+
+    # If every piece was too small, there is no AUC-ROC to report
+    if not totals:
+        return np.nan
+
+    # Each seed's weighted average AUC-ROC, then the average over the seeds
+    return float(np.mean([t / n for t, n in totals.values()]))
 
 # Returns a confidence interval 
 def paired_bootstrap(rows, score_a, score_b, by_cell=False, n_boot=1000, seed=0):
@@ -223,20 +230,20 @@ def harness_self_test(preds):
     # Random guessing
     t["random"] = rng.random(len(t))
 
+    # Pathogenicity scores are 1-prob(benignity)
+    t["model"] = 1 - t["p_benign"]
+
     # Lookup averages the amount of variants being pathogenic, and assigns that average as a score to be given to every single variant. 
     # For example, if there are 8 pathogenic variants and 12 benign variants, the average will be 8/20 = 0.4, and the AUC-ROC will test a score of 0.4 on all variants
     cell_rate = t.groupby(["gene", "consequence"])["label"].transform(lambda s: (s != "Benign").mean())
     t["lookup"] = cell_rate
-
-    # Model's pathogenicity score is 1- [the probability of benign]
-    t["model"] = 1 - t["p_benign"]
 
     # Answer key should have an AUC-ROC score of 1.0; flipped should have an AUC-ROC score of 0.0; constant guessing should have an AUC-ROC score of 0.5; random guessing
     # should have an AUC-ROC score of roughly 0.5, lookup should have an AUC-ROC score of 0.5.
     checks = [("perfect score", fold_auc(t, "perfect"), 1.0, 1e-9),
               ("flipped score", fold_auc(t, "flipped"), 0.0, 1e-9),
               ("constant score", fold_auc(t, "constant"), 0.5, 1e-9),
-              ("random score", fold_auc(t, "random"), 0.5, 0.1),  # Allowed 0.1 error because random guessing can vary in correctness
+              ("random score", fold_auc(t, "random"), 0.5, 0.05),  # Allowed 0.05 error because random guessing can vary in correctness
               ("lookup, within stratum", fold_auc(t, "lookup", by_cell = True), 0.5, 1e-9)]
 
     # For these values in checks, print out the name, score retrieved, and wanted score.
@@ -244,13 +251,19 @@ def harness_self_test(preds):
         print(f" {name:22s} AUC {got:.3f} (expect {want:.3f})")
         assert abs(got - want) <= tol, f"harness self-test failed: {name}" 
 
+    # Model minus itself should equal 0
+    low, high = paired_bootstrap(t, "model", "model", n_boot = 50)
+    print(f" model vs itself difference CI [{low:.3f}, {high:.3f}] (expect [0, 0])")
+    assert low == 0 and high == 0, "paired bootstrap self-test failed"
+    print("Harness self-test passed")
+
 # Subsets to be used for comparison of my model to REVEL/CADD/AlphaMissense
 SUBSETS = [
     ("Missense, MYH7 + MYBPC3", lambda d: d["consequence"] == "missense", False),
     ("Missense, MYH7 only", lambda d: (d["consequence"] == "missense") & (d["gene"] == "MYH7"), False),
     ("TTN nonsense", lambda d: (d["gene"] == "TTN") & (d["consequence"] == "nonsense"), False),
     ("MYBPC3 noncoding (splice)", lambda d: (d["gene"] == "MYBPC3") & (d["consequence"] == "noncoding"), False),
-    ("All the tool scores, within cells", lambda d: d["gene"].notna(), True),
+    ("All the tool scores, within stratum", lambda d: d["gene"].notna(), True),
 ]
 
 def benchmark(preds, tool_table, n_boot = 1000):
@@ -289,11 +302,11 @@ def benchmark(preds, tool_table, n_boot = 1000):
             n_path = int((same.drop_duplicates("key")["label"] != "Benign").sum())
             n_ben = same["key"].nunique() - n_path
 
-            # If the number of pathogenic or benign variants is 0, its due to the tool not giving scores for that type of class, or that there's too few pathogenic/benign variants
+            # If the number of pathogenic or benign variants is fewer than 10, its due to the tool not giving scores for that type of class, or that there's too few pathogenic/benign variants
             if min(n_path, n_ben) < 10:
                 verdict = "tool gives no scores here" if len(same) == 0 else "too few of one class"
 
-                # Apppends these results before going to the next variant
+                # Apppends these results before going to the next tool
                 results.append({"subset": name, "tool": tool, "variants": same["key"].nunique(),
                     "pathogenic / benign": f"{n_path} / {n_ben}", "verdict": verdict})
                 continue
@@ -326,13 +339,18 @@ def describe(tool, score):
     if score is None or np.isnan(score):
         return "no score (only scores missense)" if tool != "cadd" else "no score"
     if tool == "revel":
+
+        # Pathogenicity evidence in levels from strong to supporting
         for cut, text in [(0.932, "PP3 strong"), (0.773, "PP3 moderate"), (0.644, "PP3 supporting")]:
             if score >= cut:
                 return text
+
+        # Benignity evidence in levels from very strong to supporting
         for cut, text in [(0.003, "BP4 very strong"), (0.016, "BP4 strong"), (0.183, "BP4 moderate"), (0.290, "BP4 supporting")]:
             if score <= cut:
                 return text
         return "indeterminate"
+    
     if tool == "cadd":
         for cut, text in [(28.1, "PP3 moderate"), (25.3, "PP3 supporting")]:
             if score >= cut:
@@ -341,8 +359,11 @@ def describe(tool, score):
             if score <= cut:
                 return text
         return "indeterminate"
-    if score > 0.564:
-        return "likely pathogenic"
-    if score < 0.34:
-        return "likely benign"
-    return "ambiguous"
+
+    # Returns classification based on the scores for alphamissense 
+    if tool == "alphamissense":
+        if score > 0.564:
+            return "likely pathogenic"
+        if score < 0.34:
+            return "likely benign"
+        return "ambiguous"
