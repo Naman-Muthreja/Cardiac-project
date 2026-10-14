@@ -1,0 +1,16 @@
+subset,tool,variants,pathogenic / benign,tool AUC,model AUC,model - tool,95% CI,verdict
+"Missense, MYH7 + MYBPC3",revel,361,190 / 171,0.755,0.776,0.021,"[-0.040, +0.090]",tie
+"Missense, MYH7 + MYBPC3",alphamissense,361,190 / 171,0.79,0.776,-0.014,"[-0.063, +0.039]",tie
+"Missense, MYH7 + MYBPC3",cadd,361,190 / 171,0.73,0.776,0.045,"[-0.023, +0.123]",tie
+"Missense, MYH7 only",revel,330,170 / 160,0.772,0.788,0.016,"[-0.046, +0.082]",tie
+"Missense, MYH7 only",alphamissense,330,170 / 160,0.803,0.788,-0.016,"[-0.067, +0.035]",tie
+"Missense, MYH7 only",cadd,330,170 / 160,0.731,0.788,0.056,"[-0.013, +0.128]",tie
+TTN nonsense,revel,0,0 / 0,,,,,tool gives no scores here
+TTN nonsense,alphamissense,0,0 / 0,,,,,tool gives no scores here
+TTN nonsense,cadd,1162,588 / 574,0.668,0.741,0.073,"[+0.044, +0.102]",model better
+MYBPC3 noncoding (splice),revel,0,0 / 0,,,,,tool gives no scores here
+MYBPC3 noncoding (splice),alphamissense,0,0 / 0,,,,,tool gives no scores here
+MYBPC3 noncoding (splice),cadd,73,72 / 1,,,,,too few of one class
+"All the tool scores, within stratum",revel,361,190 / 171,0.771,0.777,0.006,"[-0.054, +0.070]",tie
+"All the tool scores, within stratum",alphamissense,361,190 / 171,0.801,0.777,-0.024,"[-0.073, +0.028]",tie
+"All the tool scores, within stratum",cadd,1617,864 / 753,0.683,0.749,0.066,"[+0.038, +0.093]",model better
