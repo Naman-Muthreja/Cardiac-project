@@ -1,7 +1,8 @@
 """
 Explain.py is the explainability mechanism for the model, and uses Integrated Gradients to convert "black box" predictions to data
-that physicians can actually use. Integrated Gradients fulfill the completeness axiom and sensitivity axiom, meaning that all data is accounted for,
-which helps provide the valuable information needed for the clinical report generation. In addition to Integrated Gradients from Captum, the answers must pass many thresholds.
+that physicians can actually use. Integrated Gradients fulfill the completeness axiom and sensitivity axiom, meaning that credit for the score
+adds up to roughly the variant score - baseline score, which helps provide the valuable information needed for the 
+clinical report generation. In addition to Integrated Gradients from Captum, the answers must pass many thresholds.
 """ 
 import numpy as np
 import pandas as pd
@@ -123,11 +124,11 @@ def integrated_gradients(models, x, f, x_base, f_base, steps= 64, batch_size = 2
     # "ig" is Integrated Gradients being called on the DNA sequences and features
     ig = IntegratedGradients(lambda x, f: pathogenic_prob(models, x, f))
 
-    # Intializes empty lists later to be used. Dna_parts will be the DNA sequences used, feat_parts will be the features used, p_parts will be the model's predictions, 
+    # Intializes empty lists later to be used. Dna_parts will be the DNA credits (how much each mattered), feat_parts will be the features used, p_parts will be the model's predictions, 
     # p0_parts will be the predictions for the baseline, and delta_parts will be the convergence delta for each variant.
     dna_parts, feat_parts, p_parts, p0_parts, delta_parts = [], [], [], [], []
 
-    # From the start to the end of the DNA sequence, go batch_size at a time, to split the dataset into chunks instead of IG running all at once.
+    # Runs on all the variants, going batch_size at a time, to split the dataset into chunks instead of IG running all at once.
     for start in range(0, len(x), batch_size):
 
         # Splits the dataset into parts, with slice specifying the range of indices.
@@ -137,7 +138,7 @@ def integrated_gradients(models, x, f, x_base, f_base, steps= 64, batch_size = 2
         # Integrated gradients is  the difference between the input and baseline multiplied by the average sensitivity of the path, in order to find 
         # how sensitive a model is to a change in that input. It uses Middle Riemann Approximation in this case because a pure integral cannot be done by the computer,
         # but small chunks with the middle of each rectangle found can approximate IG.
-        # Convergence delta has the formula |sum of attributions - (model output change from the baseline to variant)|.
+        # Convergence delta has the formula sum of attributions - (model output change from the baseline to variant).
         (dna, feat), delta = ig.attribute((x[part], f[part]), baselines=(x_base[part], f_base[part]), 
                                           n_steps=steps, method="riemann_middle",  return_convergence_delta=True)
 
@@ -151,16 +152,105 @@ def integrated_gradients(models, x, f, x_base, f_base, steps= 64, batch_size = 2
             p_parts.append(pathogenic_prob(models, x[part], f[part]))
             p0_parts.append(pathogenic_prob(models, x_base[part], f_base[part]))
 
-        return (torch.cat(dna_parts),torch.cat(feat_parts),torch.cat(p_parts),torch.cat(p0_parts),torch.cat(delta_parts))
+    return (torch.cat(dna_parts),torch.cat(feat_parts),torch.cat(p_parts),torch.cat(p0_parts),torch.cat(delta_parts))
 
 # Checks whether the completeness axiom has been satisified, with less than 0.01 being that it has. Completeness axiom satisfication means that every attribution is
 # accounter for; nothing comes out of thin air or disappears. 
 def check_completeness(dna, feat, p, p0, delta, tolerance = 0.01):
+
+    # Adds each variant’s DNA credits over the 4 letters and 201 positions, plus its 49 feature credits, minus the difference
+    # between the sequence and baseline
     gap = (dna.sum(dim = (1, 2)) + feat.sum(dim = 1) - (p - p0)).abs()
 
-    # Average gap must be < 0.01 for completeness axiom satisification
-    print(f"Completeness: largest gap {gap.max():.4f}, average gap {gap.mean():.5f} (must be below {tolerance}); "
-          f"Captum's convergence delta agrees to {(gap - delta.abs()).abs().max():.1e}")
+    # Largest gap is found, and the average gap must be < 0.01 for completeness axiom satisification
+    print(f"Completeness: largest gap {gap.max():.4f}, average gap {gap.mean():.5f} (must be below {tolerance}); ")
+
+     # Checks whether my formula and Captum agree
+    print(f"Captum's convergence delta agrees to {(gap - delta.abs()).abs().max():.1e}")
+    
     assert gap.max() < tolerance, "attributions do not add up; use more steps"
     assert (gap - delta.abs()).abs().max() < 1e-4, "my gap and Captum's convergence delta disagree"
     return gap
+
+# Explains each variant, with score, the baseline score, and DNA total.
+def explain(models, df, F, typical, feature_names, steps = 64):
+
+    # Resets the index of the dataframe, and then one-hot encodes the dataset
+    df = df.reset_index(drop = True)
+    X = encode_dataset(df["sequence"].tolist())
+
+    # Gets the models baseline sequences and features
+    x_base, f_base = baselines(df, F, typical)
+
+    # Calls the integrated gradients function and check_completeness function on these variants
+    dna, feat, p, p0, delta = integrated_gradients(models, X, F, x_base, f_base, steps = steps)
+    check_completeness(dna, feat, p, p0, delta)
+
+    # Defines "out" using detatch() to create a new dataframe, with new columns, while still preserving the old one
+    out = pd.DataFrame(feat.detach().numpy(), columns = feature_names)
+
+    # Uses the functions called previously in this function to define several columns in "out"
+    out.insert(0, "dna_attribution_total", dna.sum(dim = (1, 2)).numpy())
+    out.insert(0, "baseline_score", p0.numpy())
+    out.insert(0, "score", p.numpy())
+
+    probs = predict(models, X, F, DEVICE)
+
+    # Finds the probabilities (HCM, DCM, Benign) for each gene (MYH7, MYBPC3, TTN)
+    for i, name in enumerate(LABELS):
+        out[f"p_{name}"] = probs[:, i]
+
+    # Finds the pathogenic score of each of the 3 models averaged in train.py
+    with torch.no_grad():
+        for k, m in enumerate(models):
+            out[f"score_model_{k + 1}"] = pathogenic_prob([m], X, F).numpy()
+
+    return out, dna.numpy()
+
+# Checks if the IG of the 3-model average is equal to the IG of each individual model, averaged out.
+def check_linearity(models, X, F, x_base, f_base, steps = 32):
+
+    # Models together includes it being called as normal, but to find the models seperate, I use a list comprehension
+    together = integrated_gradients(models, X, F, x_base, f_base, steps)[1]
+    separate = torch.stack([integrated_gradients([m], X, F, x_base, f_base, steps)[1] for m in models]).mean(dim = 0)
+
+    # Finds the highest difference between the models together and seperately
+    gap = (together - separate).abs().max().item()
+
+    # Prints the gap, stops the script if it is greater than 1e-4, and returns the seperate models
+    print(f"Linearity: largest gap between IG(average) and average(IG) = {gap:.2e}")
+    assert gap < 1e-5
+    return separate
+
+# Determines whether Integrated Gradients correctly predicts the direction in which a model’s score changes when an 
+# important feature is reverted to its baseline value.
+def check_ablation(models, X, F, f_base, feat_attr, top = 3):
+    ig_values, real_changes = [], []
+
+    with torch.no_grad():
+
+        # Finds the pathogenicity probabilities of the model
+        p = pathogenic_prob(models, X, F)
+
+        # Reorders the features to go in descending order
+        order = feat_attr.abs().argsort(dim = 1, descending = True)[:, :top]
+
+        # For loop for each variant's top 3 features
+        for j in range(top):
+            cols = order[:, j]
+
+            # Creates a clone and arranges the rows with indices
+            F_moved = F.clone()
+            rows = torch.arange(len(F))
+
+            # I duplicate the features dataframe, revert the dataframe to the baseline, and calculate the absolute value 
+            # of the difference between those two attribution scores to see how much of an impact this change had.
+            F_moved[rows, cols] = f_base[rows, cols]
+            real_changes.append((p - pathogenic_prob(models, X, F_moved)).numpy())
+            ig_values.append(feat_attr[rows, cols].numpy())
+
+    # Compares the sign changes and score changes
+    ig_values, real_changes = np.concatenate(ig_values), np.concatenate(real_changes)
+    same_sign = np.mean(np.sign(ig_values) == np.sign(real_changes))
+
+    # Learn and do the Pearson thing tmrw
