@@ -11,6 +11,7 @@ import os
 from captum.attr import IntegratedGradients
 
 from encoding import encode_dataset
+from scipy.stats import spearmanr
 from model import CardiacCNN
 from model_extra_features import build
 from sklearn.metrics import roc_auc_score
@@ -217,7 +218,7 @@ def check_linearity(models, X, F, x_base, f_base, steps = 32):
     # Finds the highest difference between the models together and seperately
     gap = (together - separate).abs().max().item()
 
-    # Prints the gap, stops the script if it is greater than 1e-4, and returns the seperate models
+    # Prints the gap, stops the script if it is greater than 1e-5, and returns the seperate models
     print(f"Linearity: largest gap between IG(average) and average(IG) = {gap:.2e}")
     assert gap < 1e-5
     return separate
@@ -243,7 +244,7 @@ def check_ablation(models, X, F, f_base, feat_attr, top = 3):
             F_moved = F.clone()
             rows = torch.arange(len(F))
 
-            # I duplicate the features dataframe, revert the dataframe to the baseline, and calculate the absolute value 
+            # I duplicate the features dataframe, revert the dataframe to the baseline, and calculate the signed value 
             # of the difference between those two attribution scores to see how much of an impact this change had.
             F_moved[rows, cols] = f_base[rows, cols]
             real_changes.append((p - pathogenic_prob(models, X, F_moved)).numpy())
@@ -253,4 +254,61 @@ def check_ablation(models, X, F, f_base, feat_attr, top = 3):
     ig_values, real_changes = np.concatenate(ig_values), np.concatenate(real_changes)
     same_sign = np.mean(np.sign(ig_values) == np.sign(real_changes))
 
-    # Learn and do the Pearson thing tmrw
+    # Correlation coefficicient is calculated to see if the IG attributions have a positive, 0, or negative relationship
+    # with the changes in pathogenicity score.
+    r = np.corrcoef(ig_values, real_changes)[0, 1]
+
+    # Prints % of time sign is agreed on, and the correlation coefficient
+    print(f"Ablation: IG and the real one-feature change agree in sign {same_sign:.0%} of the time, correlation {r:.2f}")
+    assert same_sign > 0.9 and r > 0.7, "Ablation or correlation has failed"
+    return same_sign, r
+
+# Adebayo_check calculates Integrated Gradients for my model, an untrained one, and one trained on shuffled labels. 
+# If the test passes, the untrained model and shuffled label model should not have attributions that look similar to my trained model.
+def check_randomization(models, X, F, x_base, f_base, feat_attr, fit_df, F_fit, seed = 49):
+
+     torch.manual_seed(seed)
+
+     # Defines "untrained" to be the CNN with random weights
+     untrained = CardiacCNN(n_features = F.shape[1])
+     untrained.eval()
+
+     # Shuffles the rows inside of fit_df for the second check: a model that trains on shuffled labels.
+     shuffled = fit_df.assign(label = np.random.default_rng(seed).permutation(fit_df["label"].to_numpy()))
+     X_fit, y_shuffled = prepare_tensors(shuffled)
+     shuffled_model = fit_one(X_fit, F_fit, y_shuffled, 80, 32, 7e-4, 3e-4, seed = 0, device = DEVICE)
+
+     # Saves the original model's explanations
+     real = feat_attr.numpy()
+
+     # Identifies features that differ from the baseline
+     differs = ((F - f_base).abs() > 1e-6).numpy()
+
+     results = {}
+
+     # For the untrained model and the shuffled-label model, calculate the Integrated gradients
+     for name, m in [("untrained model", untrained), ("shuffled-label model", shuffled_model)]:
+
+          # Calaculates integrated gradients on the untrained and the shuffled model
+          other = integrated_gradients([m], X, F, x_base, f_base, steps = 32)[1].numpy()
+
+          # Calculates the spearman correlation coefficient, rho, on variants that differ in the amount of features by more
+          # than two than the baseline, also excluding features that didn't differ from the baselines. 
+          # The spearman correlation coefficient calculates how similarily in order two models rank variants.
+          rhos = [spearmanr(real[i][differs[i]], other[i][differs[i]]).correlation
+                  for i in range(len(real)) if differs[i].sum() > 2]
+
+          # Calculates the median of rhos
+          median_rho = float(np.nanmedian(rhos))
+
+          # Finds the index of the largest attribution per variant, and checks to see for what fraction that feature matches
+          # between the control models and my model.
+          same_top = float(np.mean(np.abs(real).argmax(1) == np.abs(other).argmax(1)))
+
+          print(f"Randomization, {name}: median per-variant rank correlation {median_rho:.2f}," f"same top feature {same_top:.0%}")
+
+          # Stops the script if my model is too similar to the control model
+          assert median_rho < 0.3 and same_top < 0.4, f"the {name} gets explanations like the real model's"
+          results[name] = (median_rho, same_top)
+
+     return results

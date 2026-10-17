@@ -495,8 +495,6 @@ def cross_validate(df, split_seed = 49, cv_seeds = (0, 1, 2), n_folds = 5, epoch
 
 
 
-
-
 # Old train_model script, unused now
 def old_train_model(df, epochs = 25, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 4, evaluate_test = True):
 
