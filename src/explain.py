@@ -1,8 +1,9 @@
 """
 Explain.py is the explainability mechanism for the model, and uses Integrated Gradients to convert "black box" predictions to data
 that physicians can actually use. Integrated Gradients fulfill the completeness axiom and sensitivity axiom, meaning that credit for the score
-adds up to roughly the variant score - baseline score, which helps provide the valuable information needed for the 
-clinical report generation. In addition to Integrated Gradients from Captum, the answers must pass many thresholds.
+adds up to roughly the variant score - baseline score, and that an input that changes the score gets a non-zero attribution, both of 
+which helps provide the valuable information needed for the clinical report generation. 
+In addition to Integrated Gradients the answers must pass many gates.
 """ 
 import numpy as np
 import pandas as pd
@@ -125,8 +126,9 @@ def integrated_gradients(models, x, f, x_base, f_base, steps= 64, batch_size = 2
     # "ig" is Integrated Gradients being called on the DNA sequences and features
     ig = IntegratedGradients(lambda x, f: pathogenic_prob(models, x, f))
 
-    # Intializes empty lists later to be used. Dna_parts will be the DNA credits (how much each mattered), feat_parts will be the features used, p_parts will be the model's predictions, 
-    # p0_parts will be the predictions for the baseline, and delta_parts will be the convergence delta for each variant.
+    # Intializes empty lists later to be used. Dna_parts will be the DNA credits (how much each mattered), feat_parts will be the feature credits (how valuable each was),
+    # p_parts will be the model's predictions, p0_parts will be the predictions for the baseline, 
+    # and delta_parts will be the convergence delta for each variant.
     dna_parts, feat_parts, p_parts, p0_parts, delta_parts = [], [], [], [], []
 
     # Runs on all the variants, going batch_size at a time, to split the dataset into chunks instead of IG running all at once.
@@ -160,10 +162,10 @@ def integrated_gradients(models, x, f, x_base, f_base, steps= 64, batch_size = 2
 def check_completeness(dna, feat, p, p0, delta, tolerance = 0.01):
 
     # Adds each variant’s DNA credits over the 4 letters and 201 positions, plus its 49 feature credits, minus the difference
-    # between the sequence and baseline
+    # between the variant's score and baseline score.
     gap = (dna.sum(dim = (1, 2)) + feat.sum(dim = 1) - (p - p0)).abs()
 
-    # Largest gap is found, and the average gap must be < 0.01 for completeness axiom satisification
+    # Largest gap is found, and the largest gap must be < 0.01 for completeness axiom satisification
     print(f"Completeness: largest gap {gap.max():.4f}, average gap {gap.mean():.5f} (must be below {tolerance}); ")
 
      # Checks whether my formula and Captum agree
@@ -197,7 +199,7 @@ def explain(models, df, F, typical, feature_names, steps = 64):
 
     probs = predict(models, X, F, DEVICE)
 
-    # Finds the probabilities (HCM, DCM, Benign) for each gene (MYH7, MYBPC3, TTN)
+    # Finds the probabilities (HCM, DCM, Benign) for each variant in a gene (MYH7, MYBPC3, TTN)
     for i, name in enumerate(LABELS):
         out[f"p_{name}"] = probs[:, i]
 
@@ -233,7 +235,7 @@ def check_ablation(models, X, F, f_base, feat_attr, top = 3):
         # Finds the pathogenicity probabilities of the model
         p = pathogenic_prob(models, X, F)
 
-        # Reorders the features to go in descending order
+        # Picks the column numbers of its 3 biggest credits
         order = feat_attr.abs().argsort(dim = 1, descending = True)[:, :top]
 
         # For loop for each variant's top 3 features
@@ -245,7 +247,7 @@ def check_ablation(models, X, F, f_base, feat_attr, top = 3):
             rows = torch.arange(len(F))
 
             # I duplicate the features dataframe, revert the dataframe to the baseline, and calculate the signed value 
-            # of the difference between those two attribution scores to see how much of an impact this change had.
+            # of the difference between those two pathogenic scores to see how much of an impact this change had.
             F_moved[rows, cols] = f_base[rows, cols]
             real_changes.append((p - pathogenic_prob(models, X, F_moved)).numpy())
             ig_values.append(feat_attr[rows, cols].numpy())
@@ -263,52 +265,102 @@ def check_ablation(models, X, F, f_base, feat_attr, top = 3):
     assert same_sign > 0.9 and r > 0.7, "Ablation or correlation has failed"
     return same_sign, r
 
-# Adebayo_check calculates Integrated Gradients for my model, an untrained one, and one trained on shuffled labels. 
+# Check_randomization calculates Integrated Gradients for my model, an untrained one, and one trained on shuffled labels. 
 # If the test passes, the untrained model and shuffled label model should not have attributions that look similar to my trained model.
-def check_randomization(models, X, F, x_base, f_base, feat_attr, fit_df, F_fit, seed = 49):
+def check_randomization(models, X, F, x_base, f_base, feat_attr, fit_df, F_fit, seed = 42):
 
-     torch.manual_seed(seed)
+    torch.manual_seed(seed)
 
-     # Defines "untrained" to be the CNN with random weights
-     untrained = CardiacCNN(n_features = F.shape[1])
-     untrained.eval()
+    # Defines "untrained" to be the CNN with random weights
+    untrained = CardiacCNN(n_features = F.shape[1])
+    untrained.eval()
 
-     # Shuffles the rows inside of fit_df for the second check: a model that trains on shuffled labels.
-     shuffled = fit_df.assign(label = np.random.default_rng(seed).permutation(fit_df["label"].to_numpy()))
-     X_fit, y_shuffled = prepare_tensors(shuffled)
-     shuffled_model = fit_one(X_fit, F_fit, y_shuffled, 80, 32, 7e-4, 3e-4, seed = 0, device = DEVICE)
+    # Shuffles the labels inside of fit_df for the second check: a model that trains on shuffled labels.
+    shuffled = fit_df.assign(label = np.random.default_rng(seed).permutation(fit_df["label"].to_numpy()))
+    X_fit, y_shuffled = prepare_tensors(shuffled)
+    shuffled_model = fit_one(X_fit, F_fit, y_shuffled, 80, 32, 7e-4, 3e-4, seed = 0, device = DEVICE)
 
-     # Saves the original model's explanations
-     real = feat_attr.numpy()
+    # Saves the original model's explanations
+    real = feat_attr.numpy()
 
-     # Identifies features that differ from the baseline
-     differs = ((F - f_base).abs() > 1e-6).numpy()
+    # Identifies features that differ from the baseline
+    differs = ((F - f_base).abs() > 1e-6).numpy()
 
-     results = {}
+    results = {}
 
-     # For the untrained model and the shuffled-label model, calculate the Integrated gradients
-     for name, m in [("untrained model", untrained), ("shuffled-label model", shuffled_model)]:
+    # For the untrained model and the shuffled-label model, calculate the Integrated gradients
+    for name, m in [("untrained model", untrained), ("shuffled-label model", shuffled_model)]:
 
-          # Calaculates integrated gradients on the untrained and the shuffled model
-          other = integrated_gradients([m], X, F, x_base, f_base, steps = 32)[1].numpy()
+        # Calaculates integrated gradients on the untrained and the shuffled model
+        other = integrated_gradients([m], X, F, x_base, f_base, steps = 32)[1].numpy()
 
-          # Calculates the spearman correlation coefficient, rho, on variants that differ in the amount of features by more
-          # than two than the baseline, also excluding features that didn't differ from the baselines. 
-          # The spearman correlation coefficient calculates how similarily in order two models rank variants.
-          rhos = [spearmanr(real[i][differs[i]], other[i][differs[i]]).correlation
+        # Calculates the spearman correlation coefficient, rho, on variants that differ by more than two features
+        # from the baseline, also excluding features that didn't differ from the baselines. 
+        # The spearman correlation coefficient calculates how similarily in order two models rank features.
+        rhos = [spearmanr(real[i][differs[i]], other[i][differs[i]]).correlation
                   for i in range(len(real)) if differs[i].sum() > 2]
 
-          # Calculates the median of rhos
-          median_rho = float(np.nanmedian(rhos))
+        # Calculates the median of rhos
+        median_rho = float(np.nanmedian(rhos))
 
-          # Finds the index of the largest attribution per variant, and checks to see for what fraction that feature matches
-          # between the control models and my model.
-          same_top = float(np.mean(np.abs(real).argmax(1) == np.abs(other).argmax(1)))
+        # Finds the index of the largest attribution per variant, and checks to see for what fraction that feature matches
+        # between the control models and my model.
+        same_top = float(np.mean(np.abs(real).argmax(1) == np.abs(other).argmax(1)))
 
-          print(f"Randomization, {name}: median per-variant rank correlation {median_rho:.2f}," f"same top feature {same_top:.0%}")
+        print(f"Randomization, {name}: median per-variant rank correlation {median_rho:.2f}," f" same top feature {same_top:.0%}")
 
-          # Stops the script if my model is too similar to the control model
-          assert median_rho < 0.3 and same_top < 0.4, f"the {name} gets explanations like the real model's"
-          results[name] = (median_rho, same_top)
+        # Stops the script if my model is too similar to the control model
+        assert median_rho < 0.3 and same_top < 0.4, f"the {name} gets explanations like the real model's"
+        results[name] = (median_rho, same_top)
 
-     return results
+    return results
+
+# Artificially implants a feature in the inputs for every variant, and changes all the labels (HCM, DCM, Benign) 
+# associated with that particular variant, in order to see if Integrated Gradients is truly working.
+# If Integrated Gradients is really working, then it will flag this new artificial feature above any other feature
+def check_planted_feature(fit_df, F_fit, test_df, F_test, epochs = 80, seed = 42):
+    rng = np.random.default_rng(seed)
+
+    # Creates one randomized feature per fitting variant, mean 0 and std 1 to normalize the data and for feature equalization
+    planted_fit = torch.tensor(rng.normal(size=(len(F_fit), 1)), dtype=torch.float32)
+
+    # New random numbers for the test variants
+    planted_test = torch.tensor(rng.normal(size=(len(F_test), 1)), dtype=torch.float32)
+
+    disease = {"MYH7": "HCM","MYBPC3": "HCM", "TTN": "DCM"}
+
+    # For each variant, if the planted value "v" is greater than 0, assign it to the respective disease based on gene name,
+    # otherwise make the label be benign.
+    label = lambda df, col: [disease[g] if v > 0 else "Benign" for g, v in zip(df["gene"], col[:, 0].numpy())]
+
+    # Replaces the labels with synthetic labels found on conducting the label function on planted_fit and planted_test
+    fit, test = (fit_df.assign(label = label(fit_df, planted_fit)), test_df.assign(label = label(test_df, planted_test)))
+
+    # Concatenates the fit and test dataframes
+    Ff, Ft = (torch.cat([F_fit, planted_fit], dim=1), torch.cat([F_test, planted_test], dim=1))
+
+    # Prepares the tensors (training inputs + labels)
+    X_fit, y_fit = prepare_tensors(fit)
+    X_test, _ = prepare_tensors(test)
+
+    # Trains my CNN on this synthetic dataframe
+    m = fit_one(X_fit, Ff, y_fit, epochs, 32, 7e-4, 3e-4, seed=seed, device=DEVICE)
+
+    # Finds the typical baseline for the Integrated Gradients to compare against, both DNA & feature
+    typical = typical_benign(Ff, fit)
+    x_base, f_base = baselines(test, Ft, typical)
+
+    # Calculates the feature credits for the newly trained model
+    attr = integrated_gradients([m], X_test, Ft, x_base, f_base, steps=32)[1]
+
+    # Checks whether the aritifically implanted feature ranks first
+    top_is_planted = (attr.abs().argmax(dim=1) == Ft.shape[1] - 1).float().mean().item()
+
+    # Prints out the percent of variants that IG ranks the artificially implanted score #1. and stops script if that isn't > 90%
+    print(f"Planted feature: IG ranks the artificially implanted column first for {top_is_planted:.0%} of test variants")
+    assert top_is_planted >= 0.9
+
+    return top_is_planted
+    
+    
+    
