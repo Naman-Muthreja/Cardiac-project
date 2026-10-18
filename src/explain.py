@@ -166,7 +166,7 @@ def check_completeness(dna, feat, p, p0, delta, tolerance = 0.01):
     gap = (dna.sum(dim = (1, 2)) + feat.sum(dim = 1) - (p - p0)).abs()
 
     # Largest gap is found, and the largest gap must be < 0.01 for completeness axiom satisification
-    print(f"Completeness: largest gap {gap.max():.4f}, average gap {gap.mean():.5f} (must be below {tolerance}); ")
+    print(f"Completeness: largest gap {gap.max():.4f}, average gap {gap.mean():.5f} (must be below {tolerance})")
 
      # Checks whether my formula and Captum agree
     print(f"Captum's convergence delta agrees to {(gap - delta.abs()).abs().max():.1e}")
@@ -189,7 +189,7 @@ def explain(models, df, F, typical, feature_names, steps = 64):
     dna, feat, p, p0, delta = integrated_gradients(models, X, F, x_base, f_base, steps = steps)
     check_completeness(dna, feat, p, p0, delta)
 
-    # Defines "out" using detatch() to create a new dataframe, with new columns, while still preserving the old one
+    # Defines "out" using detatch() to cut off from gradient tracking, to be able to be converted to NumPy.
     out = pd.DataFrame(feat.detach().numpy(), columns = feature_names)
 
     # Uses the functions called previously in this function to define several columns in "out"
@@ -203,7 +203,7 @@ def explain(models, df, F, typical, feature_names, steps = 64):
     for i, name in enumerate(LABELS):
         out[f"p_{name}"] = probs[:, i]
 
-    # Finds the pathogenic score of each of the 3 models averaged in train.py
+    # Finds the pathogenic scores from of the model seperately (which were then averaged to make one model later on in train.py)
     with torch.no_grad():
         for k, m in enumerate(models):
             out[f"score_model_{k + 1}"] = pathogenic_prob([m], X, F).numpy()
@@ -242,7 +242,7 @@ def check_ablation(models, X, F, f_base, feat_attr, top = 3):
         for j in range(top):
             cols = order[:, j]
 
-            # Creates a clone and arranges the rows with indices
+            # Creates a clone and assigns row numbers
             F_moved = F.clone()
             rows = torch.arange(len(F))
 
@@ -336,7 +336,7 @@ def check_planted_feature(fit_df, F_fit, test_df, F_test, epochs = 80, seed = 42
     # Replaces the labels with synthetic labels found on conducting the label function on planted_fit and planted_test
     fit, test = (fit_df.assign(label = label(fit_df, planted_fit)), test_df.assign(label = label(test_df, planted_test)))
 
-    # Concatenates the fit and test dataframes
+    # Adds the implanted to the fit and test feature dataframes
     Ff, Ft = (torch.cat([F_fit, planted_fit], dim=1), torch.cat([F_test, planted_test], dim=1))
 
     # Prepares the tensors (training inputs + labels)
@@ -356,11 +356,63 @@ def check_planted_feature(fit_df, F_fit, test_df, F_test, epochs = 80, seed = 42
     # Checks whether the aritifically implanted feature ranks first
     top_is_planted = (attr.abs().argmax(dim=1) == Ft.shape[1] - 1).float().mean().item()
 
-    # Prints out the percent of variants that IG ranks the artificially implanted score #1. and stops script if that isn't > 90%
+    # Prints out the chance (0-1) of variants that IG ranks the artificially implanted score #1. and stops script if that isn't > 0.9
     print(f"Planted feature: IG ranks the artificially implanted column first for {top_is_planted:.0%} of test variants")
     assert top_is_planted >= 0.9
 
     return top_is_planted
-    
-    
-    
+
+# Motif TGACTCA will be implanted into half of the DNA sequences, that sequence will be what decides the label, and Integrated
+# Gradients should pick up on that motif as the highest signal
+def check_planted_motif(fit_df, test_df, n_features, epochs=80, seed=42, motif="TGACTCA", start=60):
+
+    rng = np.random.default_rng(seed)
+
+    # Gene-disease correlations so that the answer is predictable
+    disease = {"MYH7": "HCM", "MYBPC3": "HCM", "TTN": "DCM"}    
+
+    # Implants the DNA motif
+    def plant(df):
+
+        # Random indicator for each variant
+        has = rng.random(len(df)) < 0.5
+
+        # Plants the motifs in the sequence if there's "has". 
+        seqs = [s[:start] + motif + s[start + len(motif):] if h else s for s, h in zip(df["sequence"], has)]
+
+        # Constructs the labels using chance, with "has" returns DCM or HCM, based on the gene.
+        labels = [disease[g] if h else "Benign" for g, h in zip(df["gene"], has)]
+       
+        return df.assign(sequence=seqs, label=labels), has
+
+    # Prepares the training and test data
+    fit, _ = plant(fit_df)
+    test, has_test = plant(test_df)
+    X_fit, y_fit = prepare_tensors(fit) # y_fit is needed to compare the model with the answers, for training
+    X_test, _ = prepare_tensors(test)
+
+    # Assigns all 0s to the engineered feature data so that only DNA is used for IG attributions (for this check)
+    F_fit, F_test = torch.zeros(len(fit), n_features), torch.zeros(len(test), n_features)
+
+    # Trains the model on this new data with the motifs, then calculates Integrated Gradients 
+    m = fit_one(X_fit, F_fit, y_fit, epochs, 32, 7e-4, 3e-4, seed=seed, device=DEVICE)
+    dna_attribution = integrated_gradients([m], X_test, F_test, torch.zeros_like(X_test), F_test,steps=32)[0]
+
+    # Measures the IG credits per position
+    per_position = dna_attribution.abs().sum(dim=1)[torch.tensor(has_test)]
+
+    # I calculate the attribution share of the motif over the total attribution,  and average the results across all variants,
+    # so I can see what percent of the DNA sequence’s attributions are due to the implanted motif. 
+    # The resulting percentage should be much higher than chance (7/201 ≈ 3.5%)
+    share = (per_position[:, start:start + len(motif)].sum(dim = 1) / per_position.sum(dim = 1)).mean().item()
+
+    # Averages attribution scores across sequences, then finds the position with the highest average score.
+    peak = per_position.mean(dim = 0).argmax().item()
+
+    print(f"Planted motif: {share:.0%} of DNA attribution falls on positions {start} to {start + len(motif) - 1} in comparison to"
+          f"7 of 201 positions = 3.5% by chance, and the peak is at position {peak}")
+    assert share > 0.5 and start <= peak < start + len(motif)
+    return share, peak
+
+
+
