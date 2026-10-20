@@ -176,7 +176,7 @@ def check_completeness(dna, feat, p, p0, delta, tolerance = 0.01):
     return gap
 
 # Explains each variant, with score, the baseline score, and DNA total.
-def explain(models, df, F, typical, feature_names, steps = 64):
+def explain(models, df, F, typical, feature_names, steps = 64, batch_size=  256):
 
     # Resets the index of the dataframe, and then one-hot encodes the dataset
     df = df.reset_index(drop = True)
@@ -186,7 +186,7 @@ def explain(models, df, F, typical, feature_names, steps = 64):
     x_base, f_base = baselines(df, F, typical)
 
     # Calls the integrated gradients function and check_completeness function on these variants
-    dna, feat, p, p0, delta = integrated_gradients(models, X, F, x_base, f_base, steps = steps)
+    dna, feat, p, p0, delta = integrated_gradients(models, X, F, x_base, f_base, steps = steps, batch_size=batch_size)
     check_completeness(dna, feat, p, p0, delta)
 
     # Defines "out" using detatch() to cut off from gradient tracking, to be able to be converted to NumPy.
@@ -203,7 +203,7 @@ def explain(models, df, F, typical, feature_names, steps = 64):
     for i, name in enumerate(LABELS):
         out[f"p_{name}"] = probs[:, i]
 
-    # Finds the pathogenic scores from of the model seperately (which were then averaged to make one model later on in train.py)
+    # Finds the pathogenic scores from of the model seperately (whose scores were then averaged to make one model later on in train.py)
     with torch.no_grad():
         for k, m in enumerate(models):
             out[f"score_model_{k + 1}"] = pathogenic_prob([m], X, F).numpy()
@@ -406,13 +406,81 @@ def check_planted_motif(fit_df, test_df, n_features, epochs=80, seed=42, motif="
     # The resulting percentage should be much higher than chance (7/201 ≈ 3.5%)
     share = (per_position[:, start:start + len(motif)].sum(dim = 1) / per_position.sum(dim = 1)).mean().item()
 
-    # Averages attribution scores across sequences, then finds the position with the highest average score.
+    # Averages credits across sequences, then finds the position with the highest average score.
     peak = per_position.mean(dim = 0).argmax().item()
 
-    print(f"Planted motif: {share:.0%} of DNA attribution falls on positions {start} to {start + len(motif) - 1} in comparison to"
+    print(f"Planted motif: {share:.0%} of DNA attribution falls on positions {start} to {start + len(motif) - 1} in comparison to "
           f"7 of 201 positions = 3.5% by chance, and the peak is at position {peak}")
     assert share > 0.5 and start <= peak < start + len(motif)
     return share, peak
 
+# GROUPS is a dictionary that includes all the feature groups I constructed, so their attributions can be 
+# summarized together in reports. 
+GROUPS = {
+    "Splice-site distance": ["tx_intronic", "tx_intron_dist", "tx_exon_edge_dist", "tx_in_cds"],
+    "Position in the protein": ["tx_protein_frac", "tx_prot_MYH7", "tx_prot_MYBPC3", "tx_prot_TTN"],
+    "Position along the gene": ["rel_pos", "rel_MYH7", "rel_MYBPC3", "rel_TTN"],
+    "Exon number and NMD": ["tx_exon_frac", "tx_last_exon", "tx_nmd_escape"],
+    "Heart use of this TTN exon": ["ttn_psi_dcm", "ttn_psi_gtex"],
+    "TTN isoforms": ["ttn_in_n2ba", "ttn_in_n2b", "ttn_in_n2a", "ttn_in_novex3"],
+    "Titin region": ["ttn_A-band", "ttn_I-band", "ttn_Z-disk", "ttn_M-band"],
+    "Amino-acid change": ["aa_grantham", "aa_blosum", "aa_hydro", "aa_volume", "aa_charge", "aa_to_pro", "aa_gly", "aa_cys"],
+    "DNA letters": ["ref_A", "alt_A", "ref_C", "alt_C", "ref_G", "alt_G", "ref_T", "alt_T"],
+    "Mutation-rate signals": ["transition", "cpg"],
+    "Gene and variant type": ["g_MYH7", "g_MYBPC3", "g_TTN", "c_missense", "c_nonsense", "c_noncoding"],
+    "DNA sequence (CNN branch)": ["dna_attribution_total"],
+}
 
+# Details about TTN
+TTN_EXON_GROUPS = ["Splice-site distance", "Exon number and NMD", "Heart use of this TTN exon", "TTN isoforms", "Titin region"]
 
+# Returns the normal feature groups for non-TTN genes and exon-related groups for TTN
+def groups_for(gene):
+
+    # If the gene is not TTN, return the normal feature groups
+    if gene != "TTN":
+      return GROUPS
+
+    # Joins the 5 exon groups' column lists into one reason
+    merged = {"Which TTN exon this is": sum((GROUPS[g] for g in TTN_EXON_GROUPS), [] )}
+
+    # For TTN: the merged exon reason first, then every other group except the 5 that were merged.
+    return {**merged, **{g: cols for g, cols in GROUPS.items() if g not in TTN_EXON_GROUPS}}
+
+def groups_mean(ig_table, df):
+    df = df.reset_index(drop = True)
+
+    # Makes a table that sums up the column values for each row (corresponding to a variant)
+    table = pd.DataFrame({g: ig_table[cols].sum(axis = 1) for g, cols in GROUPS.items()})
+
+    # "Kind" is the gene and consequence; "Class" is the label, which includes "control", or "pathogenic"
+    table["kind"] = (df["gene"] + "/" + df["consequence"]).to_numpy()
+    table["class"] = np.where(df["label"] == "Benign", "control", "pathogenic")
+
+    # Splits by class and creates a summary table showing the average feature-group attribution
+    return table.groupby(["kind", "class"]).mean().T.round(3)
+
+# Finds the numerical data needed for the explanations in the clinical report, based on IG.
+def explain_saved(models, df, F, typical, feature_names, path, steps = 64, batch_size = 256):
+    df = df.reset_index(drop = True)
+
+    # Builds an identifier for each variant
+    keys = (df["chrom"].astype(str) + ":" + df["pos"].astype(str) + df["ref"] + ">" + df["alt"]).tolist()
+
+    # Checks if path exists and reads explanations if so
+    if os.path.exists(path):
+        saved = pd.read_csv(path)
+        assert saved["key"].tolist() == keys, f"The key in the path does not match the identifiers created for the variants."
+        print(f"Read saved explanations from {path}")
+
+        # Returns the saved explanations
+        return saved.drop(columns = "key")
+
+    # If the path does not exist, reconstruct the explanations
+    out, _ = explain(models, df, F, typical, feature_names, steps = steps, batch_size = batch_size)
+    out.insert(0, "key", keys)
+    out.to_csv(path, index = False)
+
+    # Prints how many explanations were saved and returns "out", but without the key
+    print(f"Saved explanations for {len(out):,} variants to {path}")
+    return out.drop(columns = "key")

@@ -1,0 +1,18 @@
+{
+  "completeness_largest_gap": 0.003793001174926758,
+  "ablation_same_sign": 0.9902818270165209,
+  "ablation_r": 0.8888178379128417,
+  "randomization": {
+    "untrained model": [
+      0.07408231368186874,
+      0.22157434402332363
+    ],
+    "shuffled-label model": [
+      0.03626251390433815,
+      0.13119533527696792
+    ]
+  },
+  "planted_feature": 0.9854227304458618,
+  "planted_motif_share": 0.5591249465942383,
+  "planted_motif_peak": 65
+}
