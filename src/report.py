@@ -165,17 +165,17 @@ def build_context(matched, setup, cv_preds, tools):
     # "High" is when the TTN nonsense variant has a high PSI score, meaning the heart largely uses it
     high = is_ttn_nonsense & (raw_features["ttn_psi_dcm"] >= 0.9)
 
-    # “ttn_high_controls” is defined to be these benign TTN nonsense variants, with "psi_dcm" > 0.9
+    # “ttn_high_controls” is defined to be these benign TTN nonsense variants, with "psi_dcm" >= 0.9
     #  while "ttn_controls" includes all benign TTN nonsense variants, without needing to have "psi_dcm" > 0.9.
     ctx["ttn_high_controls"] = int((high & matched["label"].eq("Benign")).sum())
     ctx["ttn_controls"] = int((is_ttn_nonsense & matched["label"].eq("Benign")).sum())
 
-    # Keys and rk (cross validation rows) are defined using HGVS notation, and high_keys are the keys with label "high"
+    # Keys and rk (cross validation rows) are defined using , and high_keys are the keys with label "high"
     keys = matched["chrom"].astype(str) + ":" + matched["pos"].astype(str) + matched["ref"] + ">" + matched["alt"]
     high_keys = set(keys[high])
     rk = rows["chrom"].astype(str) + ":" + rows["pos"].astype(str) + rows["ref"] + ">" + rows["alt"]
 
-    # Cross-validation on "high-keys", returns the fold AUC-ROC score
+    # AUC-ROC score of the saved cross-validation predictions for TTN stop codons in high use exons
     ctx["ttn_high_auc"] = bench.fold_auc(rows[rk.isin(high_keys)], "model")
 
     # IDs for the tool table
@@ -214,14 +214,14 @@ def near_far_auc(matched, cv_rows, far = 3000):
          for f in range(5):
             fit = fold != f
 
-            # For each fold (not near edge), returns the positions of fold's training variants of the same gene
+            # For each fold (not near edge), returns the positions of fold's training variants of the same gene-consequence pair
             for i in np.where((fold == f) & ~near_edge)[0]:
                 same_kind = pos[fit & (cell == cell[i])]
 
                 # The span of the gene the model saw
                 span = pos[fit & (gene == gene[i])]
 
-                # The distance to the same near-kind training variant
+                # The distance to the gene-consequence matching training variant
                 distance = np.abs(same_kind - pos[i]).min() if len(same_kind) else np.inf
 
                 # "Is_far" determines if the variant is > 3000 bases away from the nearest training variant or outside the data
@@ -245,11 +245,11 @@ def near_far_auc(matched, cv_rows, far = 3000):
 # the true labels
 def calibration(ctx, cell, score):
 
-      # Keeps only rows of the same kind (gnee and consequence)
+      # Keeps only rows of the same kind (gene and consequence)
       rows = ctx["cv_rows"][ctx["cv_rows"]["cell"] == cell]
 
       # Puts variants into 5 different bins, using the floor function. The bins range from a range from 0% - 20%
-      # pathogenicity scores to 80% - 100%
+      # pathogenicity scores to 80% - 100%, and selects the bin for the current variant
       low = min(np.floor(score*5) / 5, 0.8)
 
       # Selects predictions based on the score ranges assigned by "low", and places them into variable "near"
@@ -276,7 +276,7 @@ def ttn_protein_regions():
 
     for start, end in t.exons:     
 
-        # Reorders the positions from highest to lowest (negative gene strand)
+        # Counts the amount of coding variants in the exon
         coding_here = sum(1 for p in range(end, start, -1) if p in t.coding_index)
 
         # Uses cardiodb to find the exons at the exact same place
@@ -285,27 +285,154 @@ def ttn_protein_regions():
         # Finds the per-region label, and puts it on each coding base
         base_region += [hit["region"].iloc[0] if len(hit) else "none"] * coding_here
 
-        # Splits into codon regions (by 3)
-        codon_region = base_region[::3]
+    # Splits into codon regions (by 3)
+    codon_region = base_region[::3]
 
-        # Important TTN regions are found, and then matched with the codons
-        keep = {"Z-disk": "Z-disk", "near Z-disk": "Z-disk", "I-band": "I-band", "A-band": "A-band", "M-band": "M-band"}
-        named = [keep.get(r) for r in codon_region]
+    # Important TTN regions are found, and then matched with the codons
+    keep = {"Z-disk": "Z-disk", "near Z-disk": "Z-disk", "I-band": "I-band", "A-band": "A-band", "M-band": "M-band"}
+    named = [keep.get(r) for r in codon_region]
 
-        runs, first = [], 0
+    runs, first = [], 0
 
-        # Runs for each variant until the very end
-        for k in range(1, len(named) + 1):
+    # Iterates through the codons, checking to see if its the end, and +1 is added because range() excludes stopping values
+    for k in range(1, len(named) + 1):
 
-            # The range stops running at the end (checks to see if it is at the end)
-            if k == len(named) or named[k] != named[first]:
+        # Detects when the range (including the TTN regions) ends
+        if k == len(named) or named[k] != named[first]:
 
-                # If the finished range has a real label, save it
-                if named[first]:
-                    runs.append((first + 1, k, named[first]))
+            # If the finished range has a real label, save it
+            if named[first]:
+                runs.append((first + 1, k, named[first]))
+            
+            # Tells the code when the next range begins
+            first = k
+            
+        # Returns the appended data with the range of amino acid sequences
+        return runs
 
-                # [explain here tmrw]
-                first = k
+# Converts a number to percentage text
+def pct(v):
 
-            # Retunrs the appended data with the range of amino acid sequences
-            return runs
+    # Rounds extreme predictions that would round to 100 percent or 0 percent normally instead of claiming certainity
+    if v >= 0.995:
+        return ">99%"
+    if v <= 0.005:
+        return "<1%"
+    return f"{100 * v:.0f}%"
+
+# Turns each group of data into text to be used for the clinical report
+def describe(group, raw, typ, row, names):
+     gene = row["gene"]
+
+     if group == "Which TTN exon this is":
+
+        # Uses recursion to call back on itself and find additional groups
+        parts = [describe(g, raw, typ, row, names) for g in ["Heart use of this TTN exon", "Titin region", "TTN isoforms", "Exon number and NMD"]]
+
+        # Undoes the natural log and addition of 1 with e^x - 1, to return the original splice-site distance values
+        # > 0.5 is so that the intron dist is non-zero (rounding errors can make it close to 0)
+        if np.expm1(raw["tx_intron_dist"]) > 0.5:
+            parts.append(describe("Splice-site distance", raw, typ, row, names))
+        return ". ".join(parts)
+
+     # Returns the intron distance if applicable 
+     if group == "Splice-site distance":
+        d, e = np.expm1(raw["tx_intron_dist"]), np.expm1(raw["tx_exon_edge_dist"])
+        if d > 0.5 and gene == "TTN":
+            return (f"Not inside an exon of the main TTN transcript ({d:,.0f} letters from the nearest one)")
+
+        # Converts the splice donor side to clinical text and transcribes the distance to the exon
+        if d > 0:
+            side = " (splice donor side)" if "+" in names["c"] else (" (splice acceptor side)" if "-" in names["c"] else "")
+            return f"In an intron, {d:,.0f} letters from the edge of exon {names['exon']}{side}"
+
+        # Coverts the case where the exon distance to the edge is exactly 0 intro clinical text
+        if e == 0:                                                                          
+            return f"At the very edge of exon {names['exon']} (its first or last letter), right next to the splice site"
+        return f"Inside exon {names['exon']}, {e:,.0f} letters from its edge"
+
+     # Returns the position in the protein, and compares it to the typical benign control
+     if group == "Position in the protein":
+        return f"{pct(raw['tx_protein_frac'])} of the way along the protein (typical control: {pct(typ['tx_protein_frac'])})" 
+
+     if group == "Position along the gene":
+     # If the relative position is outside of the scale, that means the variant has a stretch of the gene that
+     # is outside what the training variants cover 
+        if raw["rel_pos"] < 0 or raw["rel_pos"] > 1:
+                return (f"Outside the stretch of the gene that the training variants cover, so the model has never seen a "
+                    f"variant here. The typical control: {pct(typ['rel_pos'])}")
+
+        # Returns the relative position along that the variants cover, and compares it to the typical benign variant
+        return (f"{pct(raw['rel_pos'])} of the way along the stretch of the gene that the training variants cover (relative position)"
+                f"(typical control: {pct(typ['rel_pos'])})")
+     
+     if group == "Exon number and NMD":
+
+        # Finds the # exon out of total exons (like Exon 242 out of 324)
+        text = f"Exon {names['exon']} of {names['n_exons']}"
+
+        # Adds a last exon tag for the last exon
+        if raw["tx_last_exon"] > 0:
+            text += ", the last exon"
+
+        # Shows if NMD was escaped, which results in haploinsufficiency
+        if raw["tx_nmd_escape"] > 0:
+            text += "; a stop codon here escapes nonsense-mediated decay"
+
+        # Includes how used the TTN exon is for the variant (using PSI scores)
+        if group == "Heart use of this TTN exon":
+             return (f"Heart TTN messages include this exon {pct(raw['ttn_psi_dcm'])} of the time in DCM hearts and "
+                f"{pct(raw['ttn_psi_gtex'])} in healthy hearts (typical control: {pct(typ['ttn_psi_dcm'])})")
+
+        # Returns the specific TTN isoform if the variant is in group "TTN_isoforms"
+        if group == "TTN isoforms":
+            names_in = [n for n, c in [("N2BA", "ttn_in_n2ba"), ("N2B", "ttn_in_n2b"), ("N2A", "ttn_in_n2a"), ("novex-3", "ttn_in_novex3")] if raw[c] > 0]
+            return "Exon is part of: " + (", ".join(names_in) if names_in else "none of the four tracked isoforms")
+
+        # Returns the Titin region of the variant
+        if group == "Titin region":
+            region = [n for n in ["A-band", "I-band", "Z-disk", "M-band"] if raw[f"ttn_{n}"] > 0]
+            return f"Codes for the {region[0]} part of titin" if region else "Outside the four main titin regions"
+
+        # Finds the amino-acid change properties, by comparing the reference amino acid with the alternate amino acid
+        if group == "Amino-acid change":
+            a, b = row.get("ref_aa"), row.get("alt_aa")
+
+            # If a value has a mismatch
+            if not isinstance(a, str) or not isinstance(b, str) or a == b or "*" in (a, b):
+
+                # If its a mismatched value and the consequence is missense, the codon is split across an exon edge,
+                # meaning the amino acid features were turned into 0
+                if row.get("consequence") == "missense":                                       
+                    return (f"{names['p'] or 'Missense'}: the codon is split across an exon edge, so the amino-acid "
+                        f"features could not be read and were left at 0")
+            return "Not a missense change"
+        
+        # Returns amino acid properties, multiplication is to undo the reduction scales conducted in model_extra_features
+        return (f"{THREE[a]} to {THREE[b]}: Grantham {215 * raw['aa_grantham']:.0f} of 215, BLOSUM62 {4 * raw['aa_blosum']:+.0f}, "
+                f"hydropathy {9 * raw['aa_hydro']:+.1f}, volume {170 * raw['aa_volume']:+.0f} cubic angstroms")
+
+     if group == "DNA letters":
+
+        # Translates the reference and alternate letters to the negative strand
+        ref_c, alt_c = row["ref"].translate(COMPLEMENT), row["alt"].translate(COMPLEMENT)
+
+         # Finds and rounds the intron distance
+        d = round(float(np.expm1(raw["tx_intron_dist"])))
+
+        # Finds the donator side, since the donator side marks the start of an intron
+        side = "+" if "+" in names["c"] else "-"   
+
+        # +1 means the G of GT, +2 means T of GT, 1 means A of AG, 2 means G of AG for negative strand
+        consensus = {("+", 1): ("G", "GT donor"), ("+", 2): ("T", "GT donor"), ("-", 1): ("G", "AG acceptor"), ("-", 2): ("A", "AG acceptor")}
+
+
+        if d in (1, 2) and consensus[(side, d)][0] == ref_c:
+            letter, signal = consensus[(side, d)]
+
+            # Returns the reference letter, alternate letter, and the signal that indicates the end ofthe exon
+            return (f"{row['ref']}>{row['alt']} on the genome, {ref_c}>{alt_c} on the gene's own strand (complented). It replaces the {letter} of "
+                    f"the {signal} signal that marks the exon edge")
+        
+        return (f"{row['ref']}>{row['alt']} on the genome, {ref_c}>{alt_c} on the gene's own strand (complemented). Next to a splice site the "
+                f"exact letters matter, while elsewhere they mostly reflect which changes are common")
