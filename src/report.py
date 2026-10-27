@@ -120,11 +120,11 @@ def hgvs_names(df, transcripts = None):
 
         # Extracts the official ClinVar protein information in case the HGVS protein information process above did not work
         if not p_text and isinstance(official, str) and "(p." in official: 
-             p_text = "p." + official.split("(p.")[1].rstrip(")")
+            p_text = "p." + official.split("(p.")[1].rstrip(")")
 
         # Simplified description if the protein description still could not be found, and the consequence was nonsense
         if not p_text and getattr(r, "consequence", "") == "nonsense" and pos in t.coding_index:
-             p_text = f"p.(codon {t.coding_index[pos] // 3 + 1} to stop)"
+            p_text = f"p.(codon {t.coding_index[pos] // 3 + 1} to stop)"
 
         # Stores the results and returns the table
         out.append({ "c": c_text,"p": p_text,"exon": exon + 1,"n_exons": t.n_exons})
@@ -170,7 +170,7 @@ def build_context(matched, setup, cv_preds, tools):
     ctx["ttn_high_controls"] = int((high & matched["label"].eq("Benign")).sum())
     ctx["ttn_controls"] = int((is_ttn_nonsense & matched["label"].eq("Benign")).sum())
 
-    # Keys and rk (cross validation rows) are defined using , and high_keys are the keys with label "high"
+    # Keys and rk (cross validation rows) are defined using variant IDs , and high_keys are the keys with label "high"
     keys = matched["chrom"].astype(str) + ":" + matched["pos"].astype(str) + matched["ref"] + ">" + matched["alt"]
     high_keys = set(keys[high])
     rk = rows["chrom"].astype(str) + ":" + rows["pos"].astype(str) + rows["ref"] + ">" + rows["alt"]
@@ -208,10 +208,10 @@ def near_far_auc(matched, cv_rows, far = 3000):
 
     # For each cross-validation seed, build the folds
     for cv_seed in sorted(cv_rows["cv_seed"].unique()):
-         fold, near_edge = block_folds(data, n_folds = 5, seed = cv_seed)
+        fold, near_edge = block_folds(data, n_folds = 5, seed = cv_seed)
 
-         # Loops over folds
-         for f in range(5):
+        # Loops over folds
+        for f in range(5):
             fit = fold != f
 
             # For each fold (not near edge), returns the positions of fold's training variants of the same gene-consequence pair
@@ -245,24 +245,24 @@ def near_far_auc(matched, cv_rows, far = 3000):
 # the true labels
 def calibration(ctx, cell, score):
 
-      # Keeps only rows of the same kind (gene and consequence)
-      rows = ctx["cv_rows"][ctx["cv_rows"]["cell"] == cell]
+    # Keeps only rows of the same kind (gene and consequence)
+    rows = ctx["cv_rows"][ctx["cv_rows"]["cell"] == cell]
 
-      # Puts variants into 5 different bins, using the floor function. The bins range from a range from 0% - 20%
-      # pathogenicity scores to 80% - 100%, and selects the bin for the current variant
-      low = min(np.floor(score*5) / 5, 0.8)
+    # Puts variants into 5 different bins, using the floor function. The bins range from a range from 0% - 20%
+    # pathogenicity scores to 80% - 100%, and selects the bin for the current variant
+    low = min(np.floor(score*5) / 5, 0.8)
 
-      # Selects predictions based on the score ranges assigned by "low", and places them into variable "near"
-      near = rows[(rows["model"] >= low) & (rows["model"] < low + 0.2 + 1e-9)]
+    # Selects predictions based on the score ranges assigned by "low", and places them into variable "near"
+    near = rows[(rows["model"] >= low) & (rows["model"] < low + 0.2 + 1e-9)]
 
-      # If sufficient evidence is not there, return None
-      if len(near) < 15:
+    # If sufficient evidence is not there, return None
+    if len(near) < 15:
         return None
 
-      variants = (near["chrom"].astype(str) + ":" + near["pos"].astype(str) + near["ref"] + ">" + near["alt"]).nunique()
+    variants = (near["chrom"].astype(str) + ":" + near["pos"].astype(str) + near["ref"] + ">" + near["alt"]).nunique()
 
-      # Returns the score range, the proportion of pathogenic variants, the number of prediction rows selected, and unique # of variants
-      return low, low + 0.2, float((near["label"] != "Benign").mean()), len(near), variants
+    # Returns the score range, the proportion of pathogenic variants, the number of prediction rows selected, and unique # of variants
+    return low, low + 0.2, float((near["label"] != "Benign").mean()), len(near), variants
 
 # Converts titin’s annotations (like “A-band” or “Z-disk”) into ranges of amino acid sequences that 
 # belong to particular protein regions
@@ -307,24 +307,24 @@ def ttn_protein_regions():
             # Tells the code when the next range begins
             first = k
             
-        # Returns the appended data with the range of amino acid sequences
-        return runs
+    # Returns the appended data with the range of amino acid sequences
+    return runs
 
 # Converts a number to percentage text
 def pct(v):
 
     # Rounds extreme predictions that would round to 100 percent or 0 percent normally instead of claiming certainity
-    if v >= 0.995:
+    if v >= 0.990:
         return ">99%"
-    if v <= 0.005:
+    if v <= 0.01:
         return "<1%"
     return f"{100 * v:.0f}%"
 
 # Turns each group of data into text to be used for the clinical report
 def describe(group, raw, typ, row, names):
-     gene = row["gene"]
+    gene = row["gene"]
 
-     if group == "Which TTN exon this is":
+    if group == "Which TTN exon this is":
 
         # Uses recursion to call back on itself and find additional groups
         parts = [describe(g, raw, typ, row, names) for g in ["Heart use of this TTN exon", "Titin region", "TTN isoforms", "Exon number and NMD"]]
@@ -335,8 +335,8 @@ def describe(group, raw, typ, row, names):
             parts.append(describe("Splice-site distance", raw, typ, row, names))
         return ". ".join(parts)
 
-     # Returns the intron distance if applicable 
-     if group == "Splice-site distance":
+    # Returns the intron distance if applicable 
+    if group == "Splice-site distance":
         d, e = np.expm1(raw["tx_intron_dist"]), np.expm1(raw["tx_exon_edge_dist"])
         if d > 0.5 and gene == "TTN":
             return (f"Not inside an exon of the main TTN transcript ({d:,.0f} letters from the nearest one)")
@@ -346,28 +346,27 @@ def describe(group, raw, typ, row, names):
             side = " (splice donor side)" if "+" in names["c"] else (" (splice acceptor side)" if "-" in names["c"] else "")
             return f"In an intron, {d:,.0f} letters from the edge of exon {names['exon']}{side}"
 
-        # Coverts the case where the exon distance to the edge is exactly 0 intro clinical text
+        # Coverts the case where the exon distance to the edge is exactly 0 into clinical text
         if e == 0:                                                                          
             return f"At the very edge of exon {names['exon']} (its first or last letter), right next to the splice site"
         return f"Inside exon {names['exon']}, {e:,.0f} letters from its edge"
 
-     # Returns the position in the protein, and compares it to the typical benign control
-     if group == "Position in the protein":
+    # Returns the position in the protein, and compares it to the typical benign control
+    if group == "Position in the protein":
         return f"{pct(raw['tx_protein_frac'])} of the way along the protein (typical control: {pct(typ['tx_protein_frac'])})" 
 
-     if group == "Position along the gene":
-     # If the relative position is outside of the scale, that means the variant has a stretch of the gene that
-     # is outside what the training variants cover 
+    if group == "Position along the gene":
+        # If the relative position is outside of the scale, that means the variant has a stretch of the gene that
+        # is outside what the training variants cover 
         if raw["rel_pos"] < 0 or raw["rel_pos"] > 1:
-                return (f"Outside the stretch of the gene that the training variants cover, so the model has never seen a "
+            return (f"Outside the stretch of the gene that the training variants cover, so the model has never seen a "
                     f"variant here. The typical control: {pct(typ['rel_pos'])}")
 
         # Returns the relative position along that the variants cover, and compares it to the typical benign variant
-        return (f"{pct(raw['rel_pos'])} of the way along the stretch of the gene that the training variants cover (relative position)"
-                f"(typical control: {pct(typ['rel_pos'])})")
-     
-     if group == "Exon number and NMD":
+        return (f"{pct(raw['rel_pos'])} of the way along the stretch of the gene that the training variants cover"
+                f" (typical control: {pct(typ['rel_pos'])})")
 
+    if group == "Exon number and NMD":
         # Finds the # exon out of total exons (like Exon 242 out of 324)
         text = f"Exon {names['exon']} of {names['n_exons']}"
 
@@ -375,52 +374,54 @@ def describe(group, raw, typ, row, names):
         if raw["tx_last_exon"] > 0:
             text += ", the last exon"
 
-        # Shows if NMD was escaped, which results in haploinsufficiency
+        # Shows if NMD was escaped, which results in a shortened protein
         if raw["tx_nmd_escape"] > 0:
             text += "; a stop codon here escapes nonsense-mediated decay"
+        return text
 
-        # Includes how used the TTN exon is for the variant (using PSI scores)
-        if group == "Heart use of this TTN exon":
-             return (f"Heart TTN messages include this exon {pct(raw['ttn_psi_dcm'])} of the time in DCM hearts and "
+    # Includes how used the TTN exon is for the variant (using PSI scores)
+    if group == "Heart use of this TTN exon":
+        return (f"Heart TTN messages include this exon {pct(raw['ttn_psi_dcm'])} of the time in DCM hearts and "
                 f"{pct(raw['ttn_psi_gtex'])} in healthy hearts (typical control: {pct(typ['ttn_psi_dcm'])})")
 
-        # Returns the specific TTN isoform if the variant is in group "TTN_isoforms"
-        if group == "TTN isoforms":
-            names_in = [n for n, c in [("N2BA", "ttn_in_n2ba"), ("N2B", "ttn_in_n2b"), ("N2A", "ttn_in_n2a"), ("novex-3", "ttn_in_novex3")] if raw[c] > 0]
-            return "Exon is part of: " + (", ".join(names_in) if names_in else "none of the four tracked isoforms")
+    # Returns the specific TTN isoform if the variant is in group "TTN_isoforms"
+    if group == "TTN isoforms":
+        names_in = [n for n, c in [("N2BA", "ttn_in_n2ba"), ("N2B", "ttn_in_n2b"), ("N2A", "ttn_in_n2a"), ("novex-3", "ttn_in_novex3")] if raw[c] > 0]
+        return "Exon is part of: " + (", ".join(names_in) if names_in else "none of the four tracked isoforms")
 
-        # Returns the Titin region of the variant
-        if group == "Titin region":
-            region = [n for n in ["A-band", "I-band", "Z-disk", "M-band"] if raw[f"ttn_{n}"] > 0]
-            return f"Codes for the {region[0]} part of titin" if region else "Outside the four main titin regions"
+    # Returns the Titin region of the variant
+    if group == "Titin region":
+        region = [n for n in ["A-band", "I-band", "Z-disk", "M-band"] if raw[f"ttn_{n}"] > 0]
+        return f"Codes for the {region[0]} part of titin" if region else "Outside the four main titin regions"
 
-        # Finds the amino-acid change properties, by comparing the reference amino acid with the alternate amino acid
-        if group == "Amino-acid change":
-            a, b = row.get("ref_aa"), row.get("alt_aa")
+    # Finds the amino-acid change properties, by comparing the reference amino acid with the alternate amino acid
+    if group == "Amino-acid change":
+        a, b = row.get("ref_aa"), row.get("alt_aa")
 
-            # If a value has a mismatch
-            if not isinstance(a, str) or not isinstance(b, str) or a == b or "*" in (a, b):
+        # If a value has a mismatch
+        if not isinstance(a, str) or not isinstance(b, str) or a == b or "*" in (a, b):
 
-                # If its a mismatched value and the consequence is missense, the codon is split across an exon edge,
-                # meaning the amino acid features were turned into 0
-                if row.get("consequence") == "missense":                                       
-                    return (f"{names['p'] or 'Missense'}: the codon is split across an exon edge, so the amino-acid "
+
+            # If it's a mismatched value and the consequence is missense, the codon is split across an exon edge,
+            # meaning the amino acid features remain as 0 because they could not be read.
+            if row.get("consequence") == "missense":                                       
+                return (f"{names['p'] or 'Missense'}: the codon is split across an exon edge, so the amino-acid "
                         f"features could not be read and were left at 0")
             return "Not a missense change"
-        
+
         # Returns amino acid properties, multiplication is to undo the reduction scales conducted in model_extra_features
         return (f"{THREE[a]} to {THREE[b]}: Grantham {215 * raw['aa_grantham']:.0f} of 215, BLOSUM62 {4 * raw['aa_blosum']:+.0f}, "
                 f"hydropathy {9 * raw['aa_hydro']:+.1f}, volume {170 * raw['aa_volume']:+.0f} cubic angstroms")
 
-     if group == "DNA letters":
+    if group == "DNA letters":
 
         # Translates the reference and alternate letters to the negative strand
         ref_c, alt_c = row["ref"].translate(COMPLEMENT), row["alt"].translate(COMPLEMENT)
 
-         # Finds and rounds the intron distance
+        # Finds and rounds the intron distance
         d = round(float(np.expm1(raw["tx_intron_dist"])))
 
-        # Finds the donator side, since the donator side marks the start of an intron
+        # Finds the donor side, since the donor side marks the start of an intron
         side = "+" if "+" in names["c"] else "-"   
 
         # +1 means the G of GT, +2 means T of GT, 1 means A of AG, 2 means G of AG for negative strand
@@ -430,9 +431,190 @@ def describe(group, raw, typ, row, names):
         if d in (1, 2) and consensus[(side, d)][0] == ref_c:
             letter, signal = consensus[(side, d)]
 
-            # Returns the reference letter, alternate letter, and the signal that indicates the end ofthe exon
-            return (f"{row['ref']}>{row['alt']} on the genome, {ref_c}>{alt_c} on the gene's own strand (complented). It replaces the {letter} of "
+            # Returns the reference letter, alternate letter, and the signal that indicates the end of the exon
+            return (f"{row['ref']}>{row['alt']} on the genome, {ref_c}>{alt_c} on the gene's own strand (complemented). It replaces the {letter} of "
                     f"the {signal} signal that marks the exon edge")
-        
+
         return (f"{row['ref']}>{row['alt']} on the genome, {ref_c}>{alt_c} on the gene's own strand (complemented). Next to a splice site the "
                 f"exact letters matter, while elsewhere they mostly reflect which changes are common")
+
+    if group == "Mutation-rate signals":
+
+        # Transitions are between the same chemical family (two purines or two pyrimidines) while transversions are between
+        # different chemical families (a purine and pyrimidine)
+        kind = "A transition" if raw["transition"] > 0 else "A transversion"
+
+        # A CpG site is 10x more likely to cause a mutation, so it is marked if present
+        kind += " at a CpG site" if raw["cpg"] > 0 else ", not at a CpG site"
+
+        # Cautionary message
+        return (f"{kind}. These describe how often a change like this happens, not necessarily how harmful it is")
+
+    if group == "DNA sequence (CNN branch)":
+        return "Pattern the convolutional branch read in the 201-letter DNA window around the mutation"
+    return "DNA Sequence group not founded"
+
+# Flags variants based on rules, limits, or cautions
+def flags(row, raw, ig, ctx):
+    cell = f"{row['gene']}/{row['consequence']}"
+    out = []
+
+    # Flags if the variant is nonsense and TTN with high heart usage
+    if row["gene"] == "TTN" and row["consequence"] == "nonsense" and raw["ttn_psi_dcm"] >= 0.9:
+
+        # Finds the number of benign TTN nonsense variants that also have PSI score > 0.9 to serve as a comparison group
+        # for TTN nonsense variants that have PSI score > 0.9.
+        out.append(("limit", "Known TTN limit",
+                    f"Known limit. {ctx['ttn_high_controls']} of {ctx['ttn_controls']} benign controls in my data "
+                    f"also carry a stop codon in a TTN exon the heart uses at least 90% of the time. Inside that "
+                    f"group the model separates patients from controls only slightly better than chance "
+                    f"(AUC {ctx['ttn_high_auc']:.2f})"))
+
+    # Finds the distance to the intron. expm1 is to undo the ln + 1 used for data compression
+    d = round(float(np.expm1(raw["tx_intron_dist"])))
+
+    # Flags if the distance to the exon is 1 or 2 (Canonical splice site). ACMG cites it as very strong evidence for pathogenicity,
+    # because it changes the boundary between an intron and exon, often resulting in LOF (Loss of Function) instead of NMD
+    if row["gene"] != "TTN" and 0 < d <= 2:
+        out.append(("rule", "Canonical splice site",
+                    "Canonical splice site (1 or 2 letters from the exon). Loss of function here is a standard "
+                    "ACMG rule (PVS1)."))
+
+    # Gets the positions of the training variants
+    positions = ctx["fit_pos"].get(cell, np.array([]))
+
+    # Finds the nearest position for all positions, and takes the minimum.
+    nearest = np.abs(positions - int(row["pos"])).min() if len(positions) else np.inf
+
+    # Flags if the variant is outside of the range of training variants, or > 3000 bases away from the nearest training variant
+    # of the same gene and consequence
+    if raw["rel_pos"] < 0 or raw["rel_pos"] > 1 or nearest > 3000:
+        where = ("Beyond the range of training variants" if (raw["rel_pos"] < 0 or raw["rel_pos"] > 1)
+                 else f"{nearest:,.0f} letters from the nearest training variant of this kind")
+
+        # Returns the unfamiliar region and how well the cross-validation ranked variants that were this far, compared to variants
+        # that were close
+        out.append(("limit", "Unfamiliar region",
+                f"Unfamiliar region: this variant is {where}. In cross-validation the model ranked variants this far "
+                f"from its training data with AUC {ctx['far_auc']:.2f}, against {ctx['near_auc']:.2f} near it"))
+
+    # Finds the number of fit variants inside each group
+    n_fit = ctx["fit_counts"].get(cell,0)
+
+    # If the variant being examined has less than 30 training variants of the same gene-consequence group, flag it with
+    # a caution message.
+    if n_fit < 30:
+        out.append(("caution", "Few training variants",
+                    f"Caution: Only {n_fit} training variants of this kind ({cell})."))
+
+    # Gets the integrated gradients scores for each of the 3 models trained
+    each = [float(ig[f"score_model_{k}"]) for k in (1, 2, 3)]
+
+    # Flags if the most confident model and least confident model differ by an IG score of 0.2, since
+    # they have the same NN architecture, so a big disagreement can mean uncertainty in predictions
+    if max(each) - min(each) > 0.2:
+        out.append(("caution", "Models disagree",
+                    f"The three models disagree by {max(each) - min(each):.2f}."))
+
+    # Add up the IG credits for each feature group, and finds the highest singular reason for the attribution score
+    groups = {g: float(sum(ig[c] for c in cols)) for g, cols in groups_for(row["gene"]).items()}
+    top = max(groups, key = lambda g: abs(groups[g]))
+
+    # If the highest attribution score is significant and is "Mutation-rate signals", I flag it and return the score
+    # without that feature because it reflects how often changes like this happened in the data, depending on other variants,
+    # instead of using pathogenicity/benignity signals in the variant.
+    if top == "Mutation-rate signals" and abs(groups[top]) > 0.05:
+        without = float(ig["score"]) - groups[top]
+        out.append(("caution", "Mutation-rate shortcut",
+                 f"The biggest reason is a mutation-rate signal ({100 * groups[top]:+.0f} points). It reflects how often "
+                 f"a change like this happens and how variants were collected, not harm. If this reason was removed, the score"
+                 f" would be about {pct(min(max(without, 0), 1))}."))
+
+    # Finds the IG scores for all missense variants
+    key = f"{row['chrom']}:{int(row['pos'])}{row['ref']}>{row['alt']}"
+    if key in ctx["tools"].index and row["consequence"] == "missense":
+        score = float(ig["score"])
+
+        # Defines "tools" (AlphaMissense, REVEL, CADD)
+        tools = {"AlphaMissense": ("alphamissense", ctx["tools"].loc[key, "alphamissense"]),
+                 "REVEL": ("revel", ctx["tools"].loc[key, "revel"])}
+
+        # If my model confidently flags a variant as pathogenic, try to find a tool that says it is benign
+        if score >= 0.7:
+            against = [f"{name} {v:.2f} ({bench.describe(t, v)})" for name, (t, v) in tools.items()
+                       if v == v and bench.describe(t, v).startswith(("BP4", "likely benign"))]
+
+            # If a tool does indeed find a variant as benign and my model finds it to be pathogenic, write a cautionary message
+            if against:
+
+                # "Leans" fixes the grammar if one tool disagrees, otherwise it lists all the tools that disagree
+                out.append(("caution", "Other tools disagree",
+                            f"Other tools disagree: {' and '.join(against)} {'lean' if len(against) > 1 else 'leans'} "
+                            f"benign, while this model scores {pct(score)}."))
+
+        # If my model confidently flags a variant as benign, try to find a tool that says it is pathogenic
+        if score <= 0.3:
+            against = [f"{name} {v:.2f} ({bench.describe(t, v)})" for name, (t, v) in tools.items()
+                       if v == v and bench.describe(t, v).startswith(("PP3", "likely pathogenic"))]
+
+            # If a tool does indeed find a variant as pathogenic and my model finds it to be benign, write a cautionary message
+            if against:
+
+                # "Leans" fixes the grammar if one tool disagrees, otherwise it lists all the tools that disagree
+                out.append(("caution", "Other tools disagree",
+                            f"Other tools disagree: {' and '.join(against)} {'lean' if len(against) > 1 else 'leans'} "
+                            f"pathogenic, while this model scores {pct(score)}."))
+
+    # If the variant is in a group of similar variants that have a within_stratum AUC-ROC score of less than 0.7 (like ‘MYBPC3 missense”), 
+    # flag that the model has low reliability for those kinds of variants.
+    auc = ctx["cell_auc"].get(cell, np.nan)
+    if not np.isnan(auc) and auc < 0.7:
+        out.append(("caution", "Low reliability for this kind",
+                    f"For {cell} variants the model's cross-validated AUC is only {auc:.2f}."))
+
+    # Returns "out", which includes all flags
+    return out
+
+# A color pallete for different parts of the picture being made using SVG, with dark red to indicate disease, dark teal
+# to indicate benignity, the normal variant being colored in black, the typical control being in dark gray, and background
+# marks in light gray.
+DISEASE, BENIGN, INK, MUTED, RULE = "#9B2C2C", "#2C6E73", "#16213A", "#5B6577", "#D9DEE5"
+
+# Makes a bar graph from 0 to 100
+def scale_svg(score, baseline, width = 640):
+
+     # Converts a score to a x position on the canvas, with 20 units of margin for each increment.
+     x = lambda v: 20 + v * (width - 40)
+
+     # Score on a scale of 1 to 100, a rounded rectangle with gradient color from benign to pathogenic, a vertical line to show
+     # the control (benign) score, labels with clamps that make the middle at least 70 and at most 570,
+     # a dot of where the current variant sits on that scale, and labels for the axis.
+     return f"""<svg viewBox="0 0 {width} 74" width="100%" role="img" aria-label="Score {pct(score)} on a 0 to 100% scale">
+      <defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="{BENIGN}"/><stop offset="1" stop-color="{DISEASE}"/></linearGradient></defs>
+      <line x1="{x(baseline):.1f}" x2="{x(baseline):.1f}" y1="24" y2="46" stroke="{MUTED}" stroke-width="2" stroke-dasharray="3 3"/>
+      <text x="{min(max(x(baseline), 70), width - 70):.1f}" y="62" text-anchor="middle" class="svg-small">typical control {pct(baseline)}</text>
+      <circle cx="{x(score):.1f}" cy="35" r="9" fill="{INK}"/>
+      <text x="{min(max(x(score), 70), width - 70):.1f}" y="17" text-anchor="middle" class="svg-strong">this variant {pct(score)}</text>
+      <text x="20" y="62" class="svg-small">0%</text><text x="{width - 20}" y="62" text-anchor="end" class="svg-small">100%</text>
+      </svg>"""
+
+# Shows a waterfall of different IG credits, with scores for each feature to compare how important different features were
+def ledger_svg(baseline, items, final, width = 640):
+
+        # Leaves an empty strip at the top, defines the area of the plot, and space for the left for arrow marks
+        top, plot_h, left = 24, 150, 100
+
+        # Tallest red and tallest blue columns are found, with defaults as fallbacks
+        up = max([v for _, v in items if v > 0], default = 0)
+        down = max([-v for _, v in items if v < 0], default = 0)
+
+        # Defines the scale and the zero point
+        scale = plot_h / (up + down)
+        zero = top + up * scale
+
+        # Sets equally sized slots for each feature being analyzed, and the height of the canvas
+        slot = (width - left) / len(items)
+        height = top + plot_h + 86
+
+        
+
