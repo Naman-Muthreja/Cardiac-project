@@ -230,7 +230,7 @@ def near_far_auc(matched, cv_rows, far = 3000):
     # IDs for the cross-validation rows
     row_keys = cv_rows["chrom"].astype(str) + ":" + cv_rows["pos"].astype(str) + cv_rows["ref"] + ">" + cv_rows["alt"]
 
-    # Constructs an array that flags "far" vairnats, given cross-valdation seed, fold, and keys
+    # Constructs an array that flags "far" variants, given cross-valdation seed, fold, and keys
     flag = np.array([is_far[(cv_seed, f, k)] for cv_seed, f, k in zip(cv_rows["cv_seed"], cv_rows["fold"], row_keys)])
 
     # Finds the AUC-ROC score for near_auc and far_auc (>3000 bases away). Does this by cell, meaning by groups of the
@@ -424,7 +424,7 @@ def describe(group, raw, typ, row, names):
         # Finds the donor side, since the donor side marks the start of an intron
         side = "+" if "+" in names["c"] else "-"   
 
-        # +1 means the G of GT, +2 means T of GT, 1 means A of AG, 2 means G of AG for negative strand
+        # +1 means the G of GT, +2 means T of GT, -2 means A of AG, -1 means G of AG for negative strand
         consensus = {("+", 1): ("G", "GT donor"), ("+", 2): ("T", "GT donor"), ("-", 1): ("G", "AG acceptor"), ("-", 2): ("A", "AG acceptor")}
 
 
@@ -474,7 +474,7 @@ def flags(row, raw, ig, ctx):
     d = round(float(np.expm1(raw["tx_intron_dist"])))
 
     # Flags if the distance to the exon is 1 or 2 (Canonical splice site). ACMG cites it as very strong evidence for pathogenicity,
-    # because it changes the boundary between an intron and exon, often resulting in LOF (Loss of Function) instead of NMD
+    # because it changes the boundary between an intron and exon, resulting in LOF (Loss of Function) often through NMD
     if row["gene"] != "TTN" and 0 < d <= 2:
         out.append(("rule", "Canonical splice site",
                     "Canonical splice site (1 or 2 letters from the exon). Loss of function here is a standard "
@@ -507,7 +507,7 @@ def flags(row, raw, ig, ctx):
         out.append(("caution", "Few training variants",
                     f"Caution: Only {n_fit} training variants of this kind ({cell})."))
 
-    # Gets the integrated gradients scores for each of the 3 models trained
+    # Gets the pathogenicity scores for each of the 3 models trained
     each = [float(ig[f"score_model_{k}"]) for k in (1, 2, 3)]
 
     # Flags if the most confident model and least confident model differ by an IG score of 0.2, since
@@ -530,7 +530,7 @@ def flags(row, raw, ig, ctx):
                  f"a change like this happens and how variants were collected, not harm. If this reason was removed, the score"
                  f" would be about {pct(min(max(without, 0), 1))}."))
 
-    # Finds the IG scores for all missense variants
+    #  Looks up other tools' scores
     key = f"{row['chrom']}:{int(row['pos'])}{row['ref']}>{row['alt']}"
     if key in ctx["tools"].index and row["consequence"] == "missense":
         score = float(ig["score"])
@@ -575,10 +575,10 @@ def flags(row, raw, ig, ctx):
     # Returns "out", which includes all flags
     return out
 
-# A color pallete for different parts of the picture being made using SVG, with dark red to indicate disease, dark teal
+# A color pallete for different parts of the picture being made using SVG, with red to indicate disease, blue
 # to indicate benignity, the normal variant being colored in black, the typical control being in dark gray, and background
 # marks in light gray.
-DISEASE, BENIGN, INK, MUTED, RULE = "#9B2C2C", "#2C6E73", "#16213A", "#5B6577", "#D9DEE5"
+DISEASE, BENIGN, INK, MUTED, RULE = "#B3261E", "#1A5FB4", "#16213A", "#5B6577", "#D9DEE5"
 
 # Makes a bar graph from 0 to 100
 def scale_svg(score, baseline, width = 640):
@@ -591,6 +591,7 @@ def scale_svg(score, baseline, width = 640):
      # a dot of where the current variant sits on that scale, and labels for the axis.
      return f"""<svg viewBox="0 0 {width} 74" width="100%" role="img" aria-label="Score {pct(score)} on a 0 to 100% scale">
       <defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="{BENIGN}"/><stop offset="1" stop-color="{DISEASE}"/></linearGradient></defs>
+      <rect x="20" y="30" width="{width - 40}" height="10" rx="5" fill="url(#g)" opacity="0.28"/>
       <line x1="{x(baseline):.1f}" x2="{x(baseline):.1f}" y1="24" y2="46" stroke="{MUTED}" stroke-width="2" stroke-dasharray="3 3"/>
       <text x="{min(max(x(baseline), 70), width - 70):.1f}" y="62" text-anchor="middle" class="svg-small">typical control {pct(baseline)}</text>
       <circle cx="{x(score):.1f}" cy="35" r="9" fill="{INK}"/>
@@ -598,7 +599,7 @@ def scale_svg(score, baseline, width = 640):
       <text x="20" y="62" class="svg-small">0%</text><text x="{width - 20}" y="62" text-anchor="end" class="svg-small">100%</text>
       </svg>"""
 
-# Shows a waterfall of different IG credits, with scores for each feature to compare how important different features were
+# Shows a column chart of different IG credits, with scores for each feature to compare how important different features were
 def ledger_svg(baseline, items, final, width = 640):
 
         # Leaves an empty strip at the top, defines the area of the plot, and space for the left for arrow marks
@@ -616,5 +617,92 @@ def ledger_svg(baseline, items, final, width = 640):
         slot = (width - left) / len(items)
         height = top + plot_h + 86
 
-        
+        # Adds a label, flatline, and arrows above and below that line to represent "toward disease" and "toward benign".
+        parts = [f'<svg viewBox="0 0 {width} {height}" width="100%" role="img" aria-label="How much each reason moves the score">',
+             f'<line x1="0" x2="{width}" y1="{zero:.1f}" y2="{zero:.1f}" stroke="{INK}" stroke-width="1"/>',
+             f'<text x="0" y="{zero - 6:.1f}" class="svg-small">↑ toward disease</text>',
+             f'<text x="0" y="{zero + 14:.1f}" class="svg-small">↓ toward benign</text>']
 
+        # Iterates over each index and name-value pair
+        for k, (name, value) in enumerate(items):
+
+            # find the middle, and define the width of each column to be 55% of each slot, but never more than 46, so it still
+            # looks like a column
+            middle = left + (k + 0.5) * slot
+            bar_w = min(slot * 0.55, 46)
+
+            # Scales the height of each bar proportionate to its magnitude, with a minimum height to prevent
+            # some smaller bars from hiding.
+            bar_h = max(abs(value) * scale, 1.5)
+
+            # If the attribution score is > 0, then the bar should extend above midline, and below 0 it should have
+            # its peak be the midline, and extend downwards
+            bar_y = zero - bar_h if value > 0 else zero
+
+            # Color fills in the graph with gray, and is red if the value is > 0, otherwise benign for value < 0
+            color = "#999999" if name == "Everything else" else (DISEASE if value > 0 else BENIGN)
+
+            # Labels are 6 above the top edge for pathogenic, and 14 below the bottom edge for benign
+            label_y = bar_y - 6 if value > 0 else bar_y + bar_h + 14
+
+            # Positive if attribution score is positive, else negative
+            sign = "+" if value > 0 else "−"
+
+            # Splits the feature name based on each space into a list of words, to split each feature name into 2 lines
+            # so it doesn't bleed into the next group
+            words = name.split()
+            half = (len(words) + 1) // 2
+
+            # Makes the bars, using left edge (half the column's width subtracted from middle), height, label, color, and values
+            parts.append(f'<rect x="{middle - bar_w / 2:.1f}" y="{bar_y:.1f}" width="{bar_w:.1f}" height="{bar_h:.1f}" fill="{color}"/>'
+                     f'<text x="{middle:.1f}" y="{label_y:.1f}" text-anchor="middle" class="svg-strong">{sign}{abs(100 * value):.0f}</text>'
+                     f'<text x="{middle:.1f}" y="{top + plot_h + 30}" text-anchor="middle" class="svg-small">{html.escape(" ".join(words[:half]))}</text>'
+                     f'<text x="{middle:.1f}" y="{top + plot_h + 44}" text-anchor="middle" class="svg-small">{html.escape(" ".join(words[half:]))}</text>')
+
+        # Adds up all of the bars' values
+        total = sum(v for _, v in items)
+        parts.append(f'<text x="{(left + width) / 2:.1f}" y="{height - 8}" text-anchor="middle" class="svg-strong">'
+                 f'Typical control {pct(baseline)}   +   all reasons {"+" if total > 0 else chr(8722)}{abs(100 * total):.0f} points   =   this variant {pct(final)}</text>')
+
+        # End tag, and joins the string into one
+        parts.append("</svg>")
+        return "".join(parts)
+        
+def protein_svg(gene, codon, n_codons, ctx, width = 640):
+
+    # Finds the TTN regions, if gene is TTN, otherwise finds the other domains
+    track = ctx["ttn_regions"] if gene == "TTN" else DOMAINS[gene]
+
+    # Finds the fraction of the way from the first codon to last codon the variant's codon is, and turns that value
+    # into codon units
+    x = lambda c: 20 + (c - 1) / max(n_codons - 1, 1) * (width - 40)
+
+    # Shades of colors for each of TTN's regions
+    shades = {"Z-disk": "#C9D3E0", "I-band": "#E2E8EF", "A-band": "#B7C4D4", "M-band": "#9FB0C5"}
+
+    # Makes a thin light-grey bar for the whole chains, including all codons
+    parts = [f'<svg viewBox="0 0 {width} 86" width="100%" role="img" aria-label="Where the variant sits in the {gene} protein">',
+             f'<rect x="20" y="40" width="{width - 40}" height="8" fill="{RULE}" rx="4"/>']
+
+    labelled = set()
+
+    # For the first codon, last codon, and name, fill with the correct shades of colors, and seperates the regions into 
+    # positions
+    for a, b, name in track:
+        fill = shades.get(name, "#C3CEDC")
+        parts.append(f'<rect x="{x(a):.1f}" y="34" width="{max(x(b) - x(a), 1):.1f}" height="20" fill="{fill}" rx="3"/>')
+
+    # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the gene is MYH7 or MYBPC3. If so,
+    # appends the label to the middle position of the bar, and adds the name to labelled
+    if x(b) - x(a) > 34 and (gene != "TTN" or name not in labelled):
+        parts.append(f'<text x="{(x(a) + x(b)) / 2:.1f}" y="70" text-anchor="middle" class="svg-small">{name}</text>')
+        labelled.add(name)
+
+    # Adds a pin to the correct position on the map, and the number of codons at the end of the protein map too
+    parts.append(f'<line x1="{x(codon):.1f}" x2="{x(codon):.1f}" y1="14" y2="58" stroke="{INK}" stroke-width="2"/>'
+                 f'<circle cx="{x(codon):.1f}" cy="12" r="5" fill="{INK}"/>'
+                 f'<text x="{min(max(x(codon), 60), width - 60):.1f}" y="8" text-anchor="middle" class="svg-small svg-bold">codon {codon}</text>'
+                 f'<text x="20" y="84" class="svg-small">1</text><text x="{width - 20}" y="84" text-anchor="end" class="svg-small">{n_codons}</text></svg>')
+
+    # Glues the parts and returns it
+    return "".join(parts)
