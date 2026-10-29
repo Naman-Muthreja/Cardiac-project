@@ -694,7 +694,7 @@ def protein_svg(gene, codon, n_codons, ctx, width = 640):
         fill = shades.get(name, "#C3CEDC")
         parts.append(f'<rect x="{x(a):.1f}" y="34" width="{max(x(b) - x(a), 1):.1f}" height="20" fill="{fill}" rx="3"/>')
 
-        # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the gene is MYH7 or MYBPC3. If so,
+        # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the gene isn't labeled yet If so,
         # appends the label to the middle position of the bar, and adds the name to labelled
         if x(b) - x(a) > 34 and name not in labelled:
             parts.append(f'<text x="{(x(a) + x(b)) / 2:.1f}" y="70" text-anchor="middle" class="svg-small">{name}</text>')
@@ -758,7 +758,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     typ = ctx["typical_raw"][cell]
     score, base = float(ig["score"]), float(ig["baseline_score"])
 
-    # Uses groups_for from explain.py to categorize the 49 features into 12 distinct categories, then finds the IG score for each
+    # Uses groups_for from explain.py to categorize the 49 features into 12 distinct categories, then adds the IG credits for each
     groups = {g: float(sum(ig[c] for c in cols)) for g, cols in groups_for(gene).items()}
 
     # Sorts the data from highest to lowest to find the six highest attribution scores
@@ -810,7 +810,8 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     detail_rows = ""
 
     # For each score and feature, if the feature is everything else, move on, otherwise find the correct color and 
-    # display its attribution score and description. For example "Missense", "Amino acid properties", "+32 pts"
+    # display its attribution score and description. 
+    # For example, “Splice-site letters”, “In an intron, two letters from the edge of exon 4”, “+32 pts” is a possible row.
     for g, v in items:
         if g == "Everything else":
             continue
@@ -825,7 +826,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     if not flag_html:
         flag_html = "<p>No automatic warnings for this variant.</p>"
 
-    # If the label (like "HCM") is already known (like for training variants), return it just in the report
+    # If the label (like "HCM") is already known (like for demo variants), return it just in the report
     # to see how the model did
     truth_html = f"<p><strong>Label in my data (hidden from the model):</strong> {html.escape(truth)}</p>" if truth else ""
 
@@ -838,4 +839,58 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 
     # Finds each of the 3 model's scores
     models_text = ", ".join(pct(float(ig[f"score_model_{k}"])) for k in (1, 2, 3))
-    
+
+    # Sets up the HTML page to make sure it is compatible, and also inserts the CSS block. html.escape() is used to properly
+    # convert strings.
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(gene)} {html.escape(names['c'])} report</title><style>{CSS}</style></head><body><main class="page">
+
+<!--Top part showing the report, ID, and that its for research use only-->
+<div class="top"><span><strong>Cardiac variant explanation report</strong><br>Report {html.escape(report_id)}, {html.escape(today)}</span>
+<span class="notice">Research use only.</span></div>
+
+<!-- Gene and genomic information -->
+<h1><span class="gene">{html.escape(gene)}</span> {html.escape(names['c'])}{p_part}</h1>
+<p class="ids">{html.escape(MANE[gene][1])}, GRCh38 chr{row['chrom']}:{int(row['pos']):,} {row['ref']}&gt;{row['alt']}, {html.escape(cons)}, exon {names['exon']} of {names['n_exons']}</p>
+
+<section class="call">
+   
+   <!-- Main pathogenicity score and verdict -->
+  <div>
+    <div class="big">{pct(score)}</div>
+    <p class="verdict"><strong>{html.escape(verdict)}</strong></p>
+    <p class="legend">Chance of being disease-causing (HCM or DCM), averaged over 3 models ({models_text}).</p>
+
+    <div class="classes" aria-hidden="true"><div style="width:{100 * p_hcm:.1f}%;background:{DISEASE}"></div><div style="width:{100 * p_dcm:.1f}%;background:#6E2433"></div><div style="width:{100 * p_ben:.1f}%;background:{BENIGN}"></div></div>
+    <p class="legend">HCM {pct(p_hcm)}, DCM {pct(p_dcm)}, benign {pct(p_ben)}</p>
+  </div>    
+  
+  <!-- How reliable the model is for similar variants, and its cross-validation AUC-ROC score-->
+  <div class="panel">
+    <p><strong>How reliable is the model for {html.escape(cell)} variants?</strong></p>
+    <p>Cross-validated AUC {auc:.2f} (0.50 = coin flip, 1.00 = perfect), from {ctx['fit_counts'].get(cell, 0):,} training variants of this kind.</p>
+    <p>{html.escape(cal_text)}</p>
+    {truth_html}
+  </div>
+
+  {scale_svg(score, base)}
+
+   <!--Completeness axiom in words, to show how the score went from an average benign variant to its actual score->
+   <h2>Why the model says this</h2>
+   <p class="legend">Typical control = the average benign training variant of this gene and type, in this variant's own DNA window. Integrated Gradients splits the difference between it ({pct(base)}) and this variant ({pct(score)}) into one piece per reason; the pieces add up to the difference (gap {100 * gap:.2f} points). Each column is one reason in points: red columns push toward disease, blue columns toward benign.</p>
+   {ledger_svg(base, items, score)}
+   <table><tr><th>Reason</th><th>What is true for this variant</th><th class="num">Effect</th></tr>{detail_rows}</table>
+
+   <!-- Where the model sits in the protein, how much to trust it, using flag(), and what other tools say.->
+   <h2>Where it sits in the protein</h2>
+{protein}
+<h2>How much to trust this</h2>
+{flag_html}
+<h2>What other tools say</h2>
+<table><tr><th>Tool</th><th class="num">Score</th><th>Published category</th></tr>{tool_rows}</table>
+<p class="legend">REVEL, CADD, AlphaMissense categories: In cross-validation on missense variants my model tied all three; on TTN stop codons it beat CADD.</p>
+
+
+</section>
+
+"""
