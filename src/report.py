@@ -23,7 +23,7 @@ THREE["*"] = "Ter"
 # Start and end amino acid positions of several important regions for the reports
 DOMAINS = {
     "MYH7": [(32, 81, "SH3"), (85, 778, "Motor domain"), (781, 810, "IQ"), (839, 1935, "Coiled-coil rod")],
-    "MYBPC3": [(153, 256, "C1"), (362, 452, "C2"), (453, 543, "C3"), (544, 633, "C4"), (645, 771, "C5"),
+    "MYBPC3": [(153, 256, "C1"), (257, 361, "M-motif"), (362, 452, "C2"), (453, 543, "C3"), (544, 633, "C4"), (645, 771, "C5"),
                (774, 870, "C6"), (872, 967, "C7"), (971, 1065, "C8"), (1068, 1163, "C9"), (1181, 1274, "C10")],}
 
 # Generates the genome positions to go from high to low, like the minus strand
@@ -510,7 +510,7 @@ def flags(row, raw, ig, ctx):
     # Gets the pathogenicity scores for each of the 3 models trained
     each = [float(ig[f"score_model_{k}"]) for k in (1, 2, 3)]
 
-    # Flags if the most confident model and least confident model differ by an IG score of 0.2, since
+    # Flags if the most confident model and least confident model differ by a pathogenicity score of 0.2, since
     # they have the same NN architecture, so a big disagreement can mean uncertainty in predictions
     if max(each) - min(each) > 0.2:
         out.append(("caution", "Models disagree",
@@ -583,7 +583,8 @@ DISEASE, BENIGN, INK, MUTED, RULE = "#B3261E", "#1A5FB4", "#16213A", "#5B6577", 
 # Makes a bar graph from 0 to 100
 def scale_svg(score, baseline, width = 640):
 
-     # Converts a score to a x position on the canvas, with 20 units of margin for each increment.
+     # Converts a score to a x position on the canvas, with 20 units of margin on the left, and 6 positions to the right for every  
+     # 0.01 increase in "v"
      x = lambda v: 20 + v * (width - 40)
 
      # Score on a scale of 1 to 100, a rounded rectangle with gradient color from benign to pathogenic, a vertical line to show
@@ -667,14 +668,15 @@ def ledger_svg(baseline, items, final, width = 640):
         # End tag, and joins the string into one
         parts.append("</svg>")
         return "".join(parts)
-        
+
+# Adds how far along the protein a variant is, with the positions of important domains as well
 def protein_svg(gene, codon, n_codons, ctx, width = 640):
 
     # Finds the TTN regions, if gene is TTN, otherwise finds the other domains
     track = ctx["ttn_regions"] if gene == "TTN" else DOMAINS[gene]
 
     # Finds the fraction of the way from the first codon to last codon the variant's codon is, and turns that value
-    # into codon units
+    # into an x poisition on the canvas
     x = lambda c: 20 + (c - 1) / max(n_codons - 1, 1) * (width - 40)
 
     # Shades of colors for each of TTN's regions
@@ -692,13 +694,15 @@ def protein_svg(gene, codon, n_codons, ctx, width = 640):
         fill = shades.get(name, "#C3CEDC")
         parts.append(f'<rect x="{x(a):.1f}" y="34" width="{max(x(b) - x(a), 1):.1f}" height="20" fill="{fill}" rx="3"/>')
 
-    # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the gene is MYH7 or MYBPC3. If so,
-    # appends the label to the middle position of the bar, and adds the name to labelled
-    if x(b) - x(a) > 34 and (gene != "TTN" or name not in labelled):
-        parts.append(f'<text x="{(x(a) + x(b)) / 2:.1f}" y="70" text-anchor="middle" class="svg-small">{name}</text>')
-        labelled.add(name)
+        # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the gene is MYH7 or MYBPC3. If so,
+        # appends the label to the middle position of the bar, and adds the name to labelled
+        if x(b) - x(a) > 34 and name not in labelled:
+            parts.append(f'<text x="{(x(a) + x(b)) / 2:.1f}" y="70" text-anchor="middle" class="svg-small">{name}</text>')
+            labelled.add(name)
 
-    # Adds a pin to the correct position on the map, and the number of codons at the end of the protein map too
+    # Adds a pin to the correct position on the map, and the number of codons at the end of the protein map too. Also adds the labels
+    # labels off the codon numbers, with atleast 60 units away from the left edge and 60 from the right edge, to prevent things 
+    # from getting cut out
     parts.append(f'<line x1="{x(codon):.1f}" x2="{x(codon):.1f}" y1="14" y2="58" stroke="{INK}" stroke-width="2"/>'
                  f'<circle cx="{x(codon):.1f}" cy="12" r="5" fill="{INK}"/>'
                  f'<text x="{min(max(x(codon), 60), width - 60):.1f}" y="8" text-anchor="middle" class="svg-small svg-bold">codon {codon}</text>'
@@ -706,3 +710,132 @@ def protein_svg(gene, codon, n_codons, ctx, width = 640):
 
     # Glues the parts and returns it
     return "".join(parts)
+
+# CSS block responsible for taking the information in the clinical report and changing how it looks, including 
+# font, font size, coloring, padding, page height, italicization, bolding, outlines, and more
+CSS = """
+:root { --ink:#16213A; --muted:#5B6577; --rule:#D9DEE5; --panel:#F4F6F9; --disease:#B3261E; --benign:#1A5FB4; --amber:#8A5A12; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #E9EDF2; color: var(--ink); font: 14px/1.5 "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.page { width: 8.5in; min-height: 11in; margin: 24px auto; background: #fff; padding: 0.55in 0.6in; box-shadow: 0 1px 3px rgba(22,33,58,.18); }
+h1, h2 { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-weight: 600; letter-spacing: 0; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0; }
+h1 .gene { font-style: italic; }
+h2 { font-size: 16px; margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+.top strong { color: var(--ink); font-size: 13px; }
+.notice { border: 1px solid var(--amber); color: var(--amber); padding: 2px 8px; border-radius: 3px; font-weight: 600; }
+.ids { color: var(--muted); margin: 4px 0 0; }
+.call { display: grid; grid-template-columns: 1.1fr 1fr; gap: 22px; margin-top: 16px; align-items: start; }
+.big { font-family: Georgia, serif; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+.verdict { font-size: 15px; margin: 6px 0 4px; }
+.classes { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 8px 0 4px; }
+.legend { font-size: 12px; color: var(--muted); }
+.panel { background: var(--panel); border-radius: 6px; padding: 10px 14px; font-size: 13px; }
+.panel p { margin: 4px 0; }
+.svg-small { font: 11px "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--muted); }
+.svg-strong { font: 600 12px "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); }
+.svg-small, .svg-strong { paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+.svg-bold { font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--rule); padding: 4px 6px; }
+td { border-bottom: 1px solid var(--rule); padding: 5px 6px; vertical-align: top; }
+td.num { text-align: right; white-space: nowrap; }
+.up { color: var(--disease); font-weight: 600; } .down { color: var(--benign); font-weight: 600; }
+.flag { border-left: 2px solid var(--ink); padding: 2px 10px; margin: 8px 0; font-size: 13px; }
+.flag strong { display: block; }
+a { color: var(--ink); }
+.foot { margin-top: 22px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--rule); padding-top: 8px; }
+@media print { body { background: #fff; } .page { margin: 0; box-shadow: none; width: auto; min-height: 0; } h2, .call, table { break-inside: avoid; } }
+"""
+
+# Uses HTML to work out the values from the data and then place it into one finished HTML page
+def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", today = ""):
+
+    # Finds the type of variant and its typical control, and the associated scores
+    gene, cons = row["gene"], row["consequence"]
+    cell = f"{gene}/{cons}"
+    typ = ctx["typical_raw"][cell]
+    score, base = float(ig["score"]), float(ig["baseline_score"])
+
+    # Uses groups_for from explain.py to categorize the 49 features into 12 distinct categories, then finds the IG score for each
+    groups = {g: float(sum(ig[c] for c in cols)) for g, cols in groups_for(gene).items()}
+
+    # Sorts the data from highest to lowest to find the six highest attribution scores
+    shown = [(g, v) for g, v in sorted(groups.items(), key = lambda kv: -abs(kv[1])) if abs(v) >= 0.005][:6]
+
+    # Takes everything that is not in the 6 highest categories, and places it into category "Everything else", then finds
+    # the IG scores for that
+    rest = sum(groups.values()) - sum(v for _, v in shown)
+    items = shown + ([("Everything else", rest)] if abs(rest) >= 0.005 else [])
+
+    # Finds the gap between what the real attribution scores add up to and what the Completeness Axiom says it should add up to.
+    gap = abs(sum(groups.values()) - (score - base))
+
+    # The verdict of what the model predicts, like "HCM", as well as each individual probability
+    p_hcm, p_dcm, p_ben = float(ig["p_HCM"]), float(ig["p_DCM"]), float(ig["p_Benign"])
+    disease = "HCM" if p_hcm >= p_dcm else "DCM"
+
+    # Translates the pathogenicity scores into words
+    if score >= 0.8:
+        verdict = f"Leans disease-causing ({disease})"
+    elif score >= 0.6:
+        verdict = f"Leans toward disease-causing ({disease}), with uncertainty"
+    elif score > 0.4:
+        verdict = "Uncertain: the model cannot call this one"
+    else:
+        verdict = "Leans benign"
+
+    # Looks up the cross-validated AUC-ROC score and calls the calibration function to place the score in a range
+    auc = ctx["cell_auc"].get(cell, np.nan)
+    cal = calibration(ctx, cell, score) 
+
+    # Calibration text saying among these scores, this many were pathogenic
+    cal_text = (f"Among held-out cross-validation predictions for this kind of variant that scored {100 * cal[0]:.0f}% to "
+                f"{100 * cal[1]:.0f}%, {pct(cal[2])} were pathogenic ({cal[3]:,} predictions of {cal[4]:,} variants, with "
+                f"the benchmark being half pathogenic by design).") if cal else ""
+
+    # Defines the key and then finds the tool scores using that key
+    key = f"{row['chrom']}:{int(row['pos'])}{row['ref']}>{row['alt']}"
+    tool_rows = ""
+    tools = ctx["tools"].loc[key] if key in ctx["tools"].index else pd.Series({t: np.nan for t in bench.TOOLS})
+
+    # For each tool, get the score, show "none" if the value is N/A, and also find the description of the tool's score,
+    # such as "Likely pathogenic"
+    for tool, label, fmt in [("revel", "REVEL", "{:.3f}"), ("alphamissense", "AlphaMissense", "{:.3f}"), ("cadd", "CADD (PHRED)", "{:.1f}")]:
+        v = tools.get(tool, np.nan)
+        shown_v = "none" if pd.isna(v) else fmt.format(v)
+        tool_rows += f"<tr><td>{label}</td><td class='num'>{shown_v}</td><td>{html.escape(bench.describe(tool, v))}</td></tr>"
+
+    detail_rows = ""
+
+    # For each score and feature, if the feature is everything else, move on, otherwise find the correct color and 
+    # display its attribution score and description. For example "Missense", "Amino acid properties", "+32 pts"
+    for g, v in items:
+        if g == "Everything else":
+            continue
+        cls = "up" if v > 0 else "down"
+        detail_rows += (f"<tr><td>{html.escape(g)}</td><td>{html.escape(describe(g, raw, typ, row, names))}</td>"
+                        f"<td class='num {cls}'>{'+' if v > 0 else '-'}{abs(100 * v):.1f} pts</td></tr>")
+
+    # Flags any concerns, via the previously defined flag() function, making sure to bold the reason, like “Canonical splice site"
+    kind_name = {"limit": "Known limit", "rule": "Existing rule", "caution": "Caution"}
+    flag_html = "".join(f"<div class='flag'><strong>{kind_name[kind]}: {html.escape(short)}</strong>{html.escape(text)}</div>"
+                        for kind, short, text in warnings)
+    if not flag_html:
+        flag_html = "<p>No automatic warnings for this variant.</p>"
+
+    # If the label (like "HCM") is already known (like for training variants), return it just in the report
+    # to see how the model did
+    truth_html = f"<p><strong>Label in my data (hidden from the model):</strong> {html.escape(truth)}</p>" if truth else ""
+
+    # Gets the codon and how far along the protein the variant is, using protein_svg()
+    codon = names.get("codon")
+    protein = protein_svg(gene, codon, ctx["n_codons"][gene], ctx) if codon else ""
+
+    # Finds the protein change if possible (intronic variants don't change the protein)
+    p_part = f" ({html.escape(names['p'])})" if names["p"] else ""
+
+    # Finds each of the 3 model's scores
+    models_text = ", ".join(pct(float(ig[f"score_model_{k}"])) for k in (1, 2, 3))
+    
