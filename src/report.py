@@ -1002,10 +1002,6 @@ def write_index(rows, out_dir, show_truth):
         # Sorts the scores (item 6 of the data) in the opposite order of sorted(); from highest to lowest
         for rid, f, g, c, p, cons, s, w, t in sorted(rows, key = lambda r: -r[6]))
 
-    # Saves the index page next to the reports
-    with open(os.path.join(out_dir, "index.html"), "w", encoding = "utf-8") as fh:
-        fh.write(page)
-
     # Creates the header of the gene name and label, one "th" cell per column
     head = ("<th>Report</th><th>Gene</th><th>Variant</th><th>Type</th><th class='num'>Model</th><th>Warnings</th>"
             + ("<th>Label (hidden from model)</th>" if show_truth else ""))
@@ -1015,6 +1011,10 @@ def write_index(rows, out_dir, show_truth):
             f"<title>Variant reports</title><style>{CSS}</style></head><body>"
             f"<main class='page'><h1>Variant explanation reports</h1><p class='ids'>{len(rows)} variants, sorted by highest model scores at the top. "
             f"Research use only.</p><table><tr>{head}</tr>{body}</table></main></body></html>")
+
+    # Saves the index page next to the reports
+    with open(os.path.join(out_dir, "index.html"), "w", encoding = "utf-8") as fh:
+        fh.write(page)
 
     
 

@@ -1,0 +1,115 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TTN c.25179G&gt;A report</title><style>
+:root { --ink:#16213A; --muted:#5B6577; --rule:#D9DEE5; --panel:#F4F6F9; --disease:#B3261E; --benign:#1A5FB4; --amber:#8A5A12; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #E9EDF2; color: var(--ink); font: 14px/1.5 "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.page { width: 8.5in; min-height: 11in; margin: 24px auto; background: #fff; padding: 0.55in 0.6in; box-shadow: 0 1px 3px rgba(22,33,58,.18); }
+h1, h2 { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-weight: 600; letter-spacing: 0; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0; }
+h1 .gene { font-style: italic; }
+h2 { font-size: 16px; margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+.top strong { color: var(--ink); font-size: 13px; }
+.notice { border: 1px solid var(--amber); color: var(--amber); padding: 2px 8px; border-radius: 3px; font-weight: 600; }
+.ids { color: var(--muted); margin: 4px 0 0; }
+.call { display: grid; grid-template-columns: 1.1fr 1fr; gap: 22px; margin-top: 16px; align-items: start; }
+.big { font-family: Georgia, serif; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+.verdict { font-size: 15px; margin: 6px 0 4px; }
+.classes { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 8px 0 4px; }
+.legend { font-size: 12px; color: var(--muted); }
+.panel { background: var(--panel); border-radius: 6px; padding: 10px 14px; font-size: 13px; }
+.panel p { margin: 4px 0; }
+.svg-small { font: 11px "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--muted); }
+.svg-strong { font: 600 12px "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); }
+.svg-small, .svg-strong { paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+.svg-bold { font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--rule); padding: 4px 6px; }
+td { border-bottom: 1px solid var(--rule); padding: 5px 6px; vertical-align: top; }
+td.num { text-align: right; white-space: nowrap; }
+.up { color: var(--disease); font-weight: 600; } .down { color: var(--benign); font-weight: 600; }
+.flag { border-left: 2px solid var(--ink); padding: 2px 10px; margin: 8px 0; font-size: 13px; }
+.flag strong { display: block; }
+a { color: var(--ink); }
+.foot { margin-top: 22px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.foot p { margin: 3px 0; }
+.foot ol { margin: 2px 0 0; padding-left: 18px; }
+@media print { body { background: #fff; } .page { margin: 0; box-shadow: none; width: auto; min-height: 0; } h2, .call, table { break-inside: avoid; } }
+</style></head><body><main class="page">
+
+<!--Top part showing the report, ID, and that its for research use only-->
+<div class="top"><span><strong>Cardiac variant explanation report</strong><br>Report D093, October 31, 2026</span>
+<span class="notice">Research use only.</span></div>
+
+<!-- Gene and genomic information -->
+<h1><span class="gene">TTN</span> c.25179G&gt;A (p.Trp8393Ter)</h1>
+<p class="ids">NM_001267550.2, GRCh38 chr2:178,717,695 C&gt;T, nonsense, exon 87 of 363</p>
+
+<section class="call">
+   
+   <!-- Main pathogenicity score and verdict -->
+  <div>
+    <div class="big">19%</div>
+    <p class="verdict"><strong>Leans benign</strong></p>
+    <p class="legend">Chance of being disease-causing (HCM or DCM), averaged over 3 models (21%, 18%, 19%).</p>
+
+    <div class="classes" aria-hidden="true"><div style="width:0.1%;background:#B3261E"></div><div style="width:19.3%;background:#6E2433"></div><div style="width:80.6%;background:#1A5FB4"></div></div>
+    <p class="legend">HCM <1%, DCM 19%, benign 81%</p>
+  </div>    
+  
+  <!-- How reliable the model is for similar variants, and its cross-validation AUC-ROC score-->
+  <div class="panel">
+    <p><strong>How reliable is the model for TTN/nonsense variants?</strong></p>
+    <p>Cross-validated AUC 0.74 (0.50 = coin flip, 1.00 = perfect), from 1,043 training variants of this kind.</p>
+    <p>Among held-out cross-validation predictions for this kind of variant that scored 0% to 20%, 10% were pathogenic (493 predictions of 218 variants, with the benchmark being half pathogenic by design).</p>
+    <p><strong>Label in my data (hidden from the model):</strong> Benign</p>
+  </div>
+</section>
+
+  <svg viewBox="0 0 640 74" width="100%" role="img" aria-label="Score 19% on a 0 to 100% scale">
+      <defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#1A5FB4"/><stop offset="1" stop-color="#B3261E"/></linearGradient></defs>
+      <rect x="20" y="30" width="600" height="10" rx="5" fill="url(#g)" opacity="0.28"/>
+      <line x1="329.5" x2="329.5" y1="24" y2="46" stroke="#5B6577" stroke-width="2" stroke-dasharray="3 3"/>
+      <text x="329.5" y="62" text-anchor="middle" class="svg-small">typical control 52%</text>
+      <circle cx="136.3" cy="35" r="9" fill="#16213A"/>
+      <text x="136.3" y="17" text-anchor="middle" class="svg-strong">this variant 19%</text>
+      <text x="20" y="62" class="svg-small">0%</text><text x="620" y="62" text-anchor="end" class="svg-small">100%</text>
+      </svg>
+
+   <!--Completeness axiom in words, to show how the score went from an average benign variant to its actual score-->
+   <h2>Why the model says this</h2>
+   <p class="legend">Typical control = the average benign training variant of this gene and type, in this variant's own DNA window. Integrated Gradients splits the difference between it (52%) and this variant (19%) into one piece per reason; the pieces add up to the difference (gap 0.04 points). Each column is one reason in points: red columns push toward disease, blue columns toward benign.</p>
+   <svg viewBox="0 0 640 260" width="100%" role="img" aria-label="How much each reason moves the score"><line x1="0" x2="640" y1="45.9" y2="45.9" stroke="#16213A" stroke-width="1"/><text x="0" y="39.9" class="svg-small">↑ toward disease</text><text x="0" y="59.9" class="svg-small">↓ toward benign</text><rect x="131.0" y="45.9" width="46.0" height="128.1" fill="#1A5FB4"/><text x="154.0" y="188.0" text-anchor="middle" class="svg-strong">−17</text><text x="154.0" y="204" text-anchor="middle" class="svg-small">Which TTN exon</text><text x="154.0" y="218" text-anchor="middle" class="svg-small">this is</text><rect x="239.0" y="45.9" width="46.0" height="68.1" fill="#1A5FB4"/><text x="262.0" y="127.9" text-anchor="middle" class="svg-strong">−9</text><text x="262.0" y="204" text-anchor="middle" class="svg-small">DNA</text><text x="262.0" y="218" text-anchor="middle" class="svg-small">letters</text><rect x="347.0" y="45.9" width="46.0" height="47.8" fill="#1A5FB4"/><text x="370.0" y="107.7" text-anchor="middle" class="svg-strong">−6</text><text x="370.0" y="204" text-anchor="middle" class="svg-small">Position along</text><text x="370.0" y="218" text-anchor="middle" class="svg-small">the gene</text><rect x="455.0" y="24.0" width="46.0" height="21.9" fill="#B3261E"/><text x="478.0" y="18.0" text-anchor="middle" class="svg-strong">+3</text><text x="478.0" y="204" text-anchor="middle" class="svg-small">Mutation-rate</text><text x="478.0" y="218" text-anchor="middle" class="svg-small">signals</text><rect x="563.0" y="45.9" width="46.0" height="18.8" fill="#1A5FB4"/><text x="586.0" y="78.7" text-anchor="middle" class="svg-strong">−3</text><text x="586.0" y="204" text-anchor="middle" class="svg-small">Position in</text><text x="586.0" y="218" text-anchor="middle" class="svg-small">the protein</text><text x="370.0" y="252" text-anchor="middle" class="svg-strong">Typical control 52%   +   all reasons −32 points   =   this variant 19%</text></svg>
+   <table><tr><th>Reason</th><th>What is true for this variant</th><th class="num">Effect</th></tr><tr><td>Which TTN exon this is</td><td>Heart TTN messages include this exon 4% of the time in DCM hearts and 33% in healthy hearts (typical control: 59%). Codes for the I-band part of titin. Exon is part of: N2BA, N2A. Exon 87 of 363</td><td class='num down'>-17.1 pts</td></tr><tr><td>DNA letters</td><td>C&gt;T on the genome, G&gt;A on the gene&#x27;s own strand (complemented). Next to a splice site the exact letters matter, while elsewhere they mostly reflect which changes are common</td><td class='num down'>-9.1 pts</td></tr><tr><td>Position along the gene</td><td>31% of the way along the stretch of the gene that the training variants cover (typical control: 48%)</td><td class='num down'>-6.4 pts</td></tr><tr><td>Mutation-rate signals</td><td>A transition, not at a CpG site. These describe how often a change like this happens, not necessarily how harmful it is</td><td class='num up'>+2.9 pts</td></tr><tr><td>Position in the protein</td><td>23% of the way along the protein (typical control: 38%)</td><td class='num down'>-2.5 pts</td></tr></table>
+
+   <!-- Where the model sits in the protein, how much to trust it, using flag(), and what other tools say.-->
+   <h2>Where it sits in the protein</h2>
+<svg viewBox="0 0 640 86" width="100%" role="img" aria-label="Where the variant sits in the TTN protein"><rect x="20" y="40" width="600" height="8" fill="#D9DEE5" rx="4"/><rect x="20.0" y="34" width="26.7" height="20" fill="#C9D3E0" rx="3"/><rect x="56.2" y="34" width="21.1" height="20" fill="#E2E8EF" rx="3"/><rect x="82.6" y="34" width="128.0" height="20" fill="#E2E8EF" rx="3"/><text x="146.6" y="70" text-anchor="middle" class="svg-small">I-band</text><rect x="211.1" y="34" width="1.0" height="20" fill="#E2E8EF" rx="3"/><rect x="211.9" y="34" width="4.7" height="20" fill="#E2E8EF" rx="3"/><rect x="224.0" y="34" width="1.0" height="20" fill="#E2E8EF" rx="3"/><rect x="227.2" y="34" width="1.0" height="20" fill="#E2E8EF" rx="3"/><rect x="237.0" y="34" width="4.7" height="20" fill="#E2E8EF" rx="3"/><rect x="243.9" y="34" width="37.0" height="20" fill="#E2E8EF" rx="3"/><rect x="281.0" y="34" width="298.9" height="20" fill="#B7C4D4" rx="3"/><text x="430.5" y="70" text-anchor="middle" class="svg-small">A-band</text><rect x="580.0" y="34" width="40.0" height="20" fill="#9FB0C5" rx="3"/><text x="600.0" y="70" text-anchor="middle" class="svg-small">M-band</text><line x1="159.9" x2="159.9" y1="14" y2="58" stroke="#16213A" stroke-width="2"/><circle cx="159.9" cy="12" r="5" fill="#16213A"/><text x="159.9" y="8" text-anchor="middle" class="svg-small svg-bold">codon 8393</text><text x="20" y="84" class="svg-small">1</text><text x="620" y="84" text-anchor="end" class="svg-small">35991</text></svg>
+<h2>How much to trust this</h2>
+<p>No automatic warnings for this variant.</p>
+<h2>What other tools say</h2>
+<table><tr><th>Tool</th><th class="num">Score</th><th>Published category</th></tr><tr><td>REVEL</td><td class='num'>none</td><td>no score (only scores missense)</td></tr><tr><td>AlphaMissense</td><td class='num'>none</td><td>no score (only scores missense)</td></tr><tr><td>CADD (PHRED)</td><td class='num'>52.0</td><td>PP3 moderate</td></tr></table>
+<p class="legend">REVEL, CADD, AlphaMissense categories: references [4] and [7]. In cross-validation on missense variants my model tied all three; on TTN stop codons it beat CADD.</p>
+
+<!-- Footer: model, explanation method, limits, and every reference used on this page -->
+<div class="foot">
+<p><strong>Model:</strong> CardiacCNN (two-branch CNN on a 201-letter DNA window plus 49 biological features), 3 models trained on ClinVar [9] and gnomAD [10] variants.</p>
+<p><strong>Explanation:</strong> Integrated Gradients [1] computed with Captum [2].</p>
+<p><strong>Limits:</strong> Not validated for clinical use. A score is evidence about how this model behaves, not a diagnosis.</p>
+<p><strong>References</strong></p>
+<ol>
+<li>Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.</li>
+<li>Kokhlikyan N, et al. Captum: a unified and generic model interpretability library for PyTorch. arXiv:2009.07896, 2020.</li>
+<li>Richards S, et al. Standards and guidelines for the interpretation of sequence variants (ACMG/AMP). Genet Med 2015;17:405-424.</li>
+<li>Pejaver V, et al. Calibration of computational tools for missense variant pathogenicity classification and ClinGen recommendations for PP3/BP4 criteria. Am J Hum Genet 2022;109:2163-2177.</li>
+<li>Ioannidis NM, et al. REVEL: an ensemble method for predicting the pathogenicity of rare missense variants. Am J Hum Genet 2016;99:877-885.</li>
+<li>Rentzsch P, et al. CADD: predicting the deleteriousness of variants throughout the human genome. Nucleic Acids Res 2019;47:D886-D894.</li>
+<li>Cheng J, et al. Accurate proteome-wide missense variant effect prediction with AlphaMissense. Science 2023;381:eadg7492.</li>
+<li>Morales J, et al. A joint NCBI and EMBL-EBI transcript set for clinical genomics and research (MANE). Nature 2022;604:310-315.</li>
+<li>Landrum MJ, et al. ClinVar: improving access to variant interpretations and supporting evidence. Nucleic Acids Res 2018;46:D1062-D1067.</li>
+<li>Karczewski KJ, et al. The mutational constraint spectrum quantified from variation in 141,456 humans (gnomAD). Nature 2020;581:434-443.</li>
+<li>The UniProt Consortium. UniProt: the Universal Protein Knowledgebase in 2023. Nucleic Acids Res 2023;51:D523-D531.</li>
+<li>Roberts AM, et al. Integrated allelic, transcriptional, and phenomic dissection of the cardiac effects of titin truncations in health and disease. Sci Transl Med 2015;7:270ra6.</li>
+</ol>
+</div>
+</main></body></html>
