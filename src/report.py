@@ -130,7 +130,7 @@ def hgvs_names(df, transcripts = None):
         out.append({ "c": c_text,"p": p_text,"exon": exon + 1,"n_exons": t.n_exons})
     return pd.DataFrame(out, index = df.index)
 
-# Typical control and where the training variants are
+# Typical control and where the information about the training variants, like where they are
 def build_context(matched, setup, cv_preds, tools):
 
     # Gets all the training variants, and recalculates the raw features
@@ -190,7 +190,7 @@ def build_context(matched, setup, cv_preds, tools):
     # Finds the regions of TTN and then returns ctx
     ctx["ttn_regions"] = ttn_protein_regions()
     # Finds the number of codons and adds it to ctx
-    ctx["n_codons"] = {g: len(t.coding) // 3 - 1 for g, t in load_transcripts.items()}
+    ctx["n_codons"] = {g: len(t.coding) // 3 - 1 for g, t in load_transcripts().items()}
 
     return ctx
 
@@ -590,7 +590,7 @@ def scale_svg(score, baseline, width = 640):
      # 0.01 increase in "v"
      x = lambda v: 20 + v * (width - 40)
 
-     # Score on a scale of 1 to 100, a rounded rectangle with gradient color from benign to pathogenic, a vertical line to show
+     # Score on a scale of 0 to 100, a rounded rectangle with gradient color from benign to pathogenic, a vertical line to show
      # the control (benign) score, labels with clamps that make the middle at least 70 and at most 570,
      # a dot of where the current variant sits on that scale, and labels for the axis.
      return f"""<svg viewBox="0 0 {width} 74" width="100%" role="img" aria-label="Score {pct(score)} on a 0 to 100% scale">
@@ -697,7 +697,7 @@ def protein_svg(gene, codon, n_codons, ctx, width = 640):
         fill = shades.get(name, "#C3CEDC")
         parts.append(f'<rect x="{x(a):.1f}" y="34" width="{max(x(b) - x(a), 1):.1f}" height="20" fill="{fill}" rx="3"/>')
 
-        # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the gene isn't labeled yet If so,
+        # Checks if the bar is greater than 34 (otherwise the label is bigger), and if the name isn't labeled yet If so,
         # appends the label to the middle position of the bar, and adds the name to labelled
         if x(b) - x(a) > 34 and name not in labelled:
             parts.append(f'<text x="{(x(a) + x(b)) / 2:.1f}" y="70" text-anchor="middle" class="svg-small">{name}</text>')
@@ -749,6 +749,8 @@ td.num { text-align: right; white-space: nowrap; }
 .flag strong { display: block; }
 a { color: var(--ink); }
 .foot { margin-top: 22px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.foot p { margin: 3px 0; }
+.foot ol { margin: 2px 0 0; padding-left: 18px; }
 @media print { body { background: #fff; } .page { margin: 0; box-shadow: none; width: auto; min-height: 0; } h2, .call, table { break-inside: avoid; } }
 """
 
@@ -768,7 +770,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     shown = [(g, v) for g, v in sorted(groups.items(), key = lambda kv: -abs(kv[1])) if abs(v) >= 0.005][:6]
 
     # Takes everything that is not in the 6 highest categories, and places it into category "Everything else", then finds
-    # the IG scores for that
+    # the IG credits for that
     rest = sum(groups.values()) - sum(v for _, v in shown)
     items = shown + ([("Everything else", rest)] if abs(rest) >= 0.005 else [])
 
@@ -814,7 +816,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 
     # For each score and feature, if the feature is everything else, move on, otherwise find the correct color and 
     # display its attribution score and description. 
-    # For example, “Splice-site letters”, “In an intron, two letters from the edge of exon 4”, “+32 pts” is a possible row.
+    # For example, “Splice-site distance”, “In an intron, two letters from the edge of exon 4”, “+32 pts” is a possible row.
     for g, v in items:
         if g == "Everything else":
             continue
@@ -831,7 +833,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 
     # If the label (like "HCM") is already known (like for demo variants), return it just in the report
     # to see how the model did
-    truth_html = f"<p><strong>Label in my data (hidden from the model):</strong> {html.escape(truth)}</p>" if truth else ""
+    truth_html = f"<p><strong>Label in my data (hidden from the model):</strong> {html.escape(truth)}</p>" if truth else "" 
 
     # Gets the codon and how far along the protein the variant is, using protein_svg()
     codon = names.get("codon")
@@ -898,18 +900,21 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 <!-- Footer: model, explanation method, limits, and every reference used on this page -->
 <div class="foot">
 <p><strong>Model:</strong> CardiacCNN (two-branch CNN on a 201-letter DNA window plus 49 biological features), 3 models trained on ClinVar [9] and gnomAD [10] variants.</p>
-<p><strong>Explanation:</strong> Integrated Gradients [1] computed with Captum [2]</p>
-<p><strong>Limits:
+<p><strong>Explanation:</strong> Integrated Gradients [1] computed with Captum [2].</p>
+<p><strong>Limits:</strong> Not validated for clinical use. A score is evidence about how this model behaves, not a diagnosis.</p>
+<p><strong>References</strong></p>
 <ol>
 <li>Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.</li>
 <li>Kokhlikyan N, et al. Captum: a unified and generic model interpretability library for PyTorch. arXiv:2009.07896, 2020.</li>
 <li>Richards S, et al. Standards and guidelines for the interpretation of sequence variants (ACMG/AMP). Genet Med 2015;17:405-424.</li>
+<li>Pejaver V, et al. Calibration of computational tools for missense variant pathogenicity classification and ClinGen recommendations for PP3/BP4 criteria. Am J Hum Genet 2022;109:2163-2177.</li>
 <li>Ioannidis NM, et al. REVEL: an ensemble method for predicting the pathogenicity of rare missense variants. Am J Hum Genet 2016;99:877-885.</li>
 <li>Rentzsch P, et al. CADD: predicting the deleteriousness of variants throughout the human genome. Nucleic Acids Res 2019;47:D886-D894.</li>
 <li>Cheng J, et al. Accurate proteome-wide missense variant effect prediction with AlphaMissense. Science 2023;381:eadg7492.</li>
 <li>Morales J, et al. A joint NCBI and EMBL-EBI transcript set for clinical genomics and research (MANE). Nature 2022;604:310-315.</li>
 <li>Landrum MJ, et al. ClinVar: improving access to variant interpretations and supporting evidence. Nucleic Acids Res 2018;46:D1062-D1067.</li>
 <li>Karczewski KJ, et al. The mutational constraint spectrum quantified from variation in 141,456 humans (gnomAD). Nature 2020;581:434-443.</li>
+<li>The UniProt Consortium. UniProt: the Universal Protein Knowledgebase in 2023. Nucleic Acids Res 2023;51:D523-D531.</li>
 <li>Roberts AM, et al. Integrated allelic, transcriptional, and phenomic dissection of the cardiac effects of titin truncations in health and disease. Sci Transl Med 2015;7:270ra6.</li>
 </ol>
 </div>
@@ -918,7 +923,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 # Turns the made clinical reports into an HTML file that can be downloaded
 def write_reports(df, ig_table, setup, ctx, out_dir, show_truth = True, prefix = "R"):
 
-    # Creates an output directory for the user to recieve the file
+    # Creates an output directory for the user to receive the file
     os.makedirs(out_dir, exist_ok = True)
 
     # Old pages are removed first in a folder, so a page from an earlier run that may have been using a different model
@@ -931,7 +936,7 @@ def write_reports(df, ig_table, setup, ctx, out_dir, show_truth = True, prefix =
     assert len(df) == len(ig_table), "one explanation row is needed per variant"
     df, ig_table = df.reset_index(drop = True), ig_table.reset_index(drop = True)
 
-    # Runs several functions on all the variants at once instead of going one a a time. These functions are run
+    # Runs several functions on all the variants at once instead of going at a time. These functions are run
     # so the clinical report works on my data.
     raw = setup["raw"](df)
     ann = annotate(df)
@@ -962,17 +967,68 @@ def write_reports(df, ig_table, setup, ctx, out_dir, show_truth = True, prefix =
         # If there is a label for the dataset, show it just on the report to see how the model did
         truth = row["label"] if show_truth and "label" in row else None
 
+        # Finds this variant's warnings with flags(), then builds its whole page as one string with render()
+        warnings = flags(r, raw.loc[i], ig_table.loc[i], ctx)
+        page = render(r, ig_table.loc[i], raw.loc[i], n, ctx, warnings, truth, report_id, today)
+
         # Builds the file name
         file = f"{report_id}_{row['gene']}_{n['c'].replace('>', '-').replace('*', 'x')}.html"
 
+        # Opens the file and writes the page
         with open(os.path.join(out_dir, file), "w", encoding = "utf-8") as fh:
             fh.write(page)
 
-        # Summarizes
+        # Summarizes the data
         index_rows.append((report_id, file, row["gene"], n["c"], n["p"], row["consequence"], float(ig_table.loc[i, "score"]),
                            "; ".join(short for _, short, _ in warnings), truth))
 
-        write_index(index_rows, out_dir, show_truth)
-        return index_rows
+    # Runs once, after every report is saved
+    write_index(index_rows, out_dir, show_truth)
+    return index_rows
 
+# Takes index_rows and converts it into a contents page, with highest scores at the top
+def write_index(rows, out_dir, show_truth):
+    body = "".join(
 
+        # Hyperlinks the report, italicizes the gene's name, and adds the genomic notation
+        f"<tr><td><a href='{html.escape(f)}'>{rid}</a></td><td><em>{g}</em></td><td>{html.escape(c)} {html.escape(p)}</td>"
+
+        # Checks for the warnings, otherwise returns 'none'
+        f"<td>{html.escape(cons)}</td><td class='num'>{pct(s)}</td><td>{html.escape(w) or 'none'}</td>"
+
+        # Shows the true label if possible
+        + (f"<td>{html.escape(str(t))}</td>" if show_truth else "") + "</tr>"
+
+        # Sorts the scores (item 6 of the data) in the opposite order of sorted(); from highest to lowest
+        for rid, f, g, c, p, cons, s, w, t in sorted(rows, key = lambda r: -r[6]))
+
+    # Creates the header of the gene name and label, one "th" cell per column
+    head = ("<th>Report</th><th>Gene</th><th>Variant</th><th>Type</th><th class='num'>Model</th><th>Warnings</th>"
+            + ("<th>Label (hidden from model)</th>" if show_truth else ""))
+
+    # Makes an html page called "Variant reports", with labels
+    page = (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            f"<title>Variant reports</title><style>{CSS}</style></head><body>"
+            f"<main class='page'><h1>Variant explanation reports</h1><p class='ids'>{len(rows)} variants, sorted by highest model scores at the top. "
+            f"Research use only.</p><table><tr>{head}</tr>{body}</table></main></body></html>")
+
+# Warning table returns the different warnings found by flags in one table
+def warning_table(df, ig_table, setup, ctx):
+    df = df.reset_index(drop = True)
+    raw = setup["raw"](df)
+    found = [flags(df.loc[i], raw.loc[i], ig_table.loc[i], ctx) for i in range(len(df))]
+    return pd.DataFrame({"warning_kinds": [";".join(kind for kind, _, _ in f) for f in found],
+                         "warnings": ["; ".join(short for _, short, _ in f) for f in found]})
+
+# Pick_showcase chooses a fair handful of VUS variants to write a clinical report about, making sure to pick high
+# and low scores
+def pick_showcase(table, high = 3, low = 2):
+    clean = table[~table["warning_kinds"].str.contains("limit|caution")]
+    picks = []
+    for _, part in clean.groupby(["gene", "consequence"]):
+        picks += list(part.nlargest(high, "score").index) + list(part.nsmallest(low, "score").index)
+    return list(dict.fromkeys(picks))
+    
+# Saves the index page next to the reports
+with open(os.path.join(out_dir, "index.html"), "w", encoding = "utf-8") as fh:
+    fh.write(page)
