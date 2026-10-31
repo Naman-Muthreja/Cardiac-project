@@ -10,7 +10,7 @@ import pandas as pd
 import Revel_cadd_alphamissense_bench as bench
 from explain import GROUPS, groups_for
 from train import make_regions_split, block_folds
-from model_extra_features import load_transcripts, load_ttn_exons, MANE, COMPLEMENT, CODON_TABLE
+from model_extra_features import load_transcripts, annotate, load_ttn_exons, MANE, COMPLEMENT, CODON_TABLE
 
 
 # Converts each one letter abbreviation for an amino acid to a three letter short form
@@ -189,6 +189,9 @@ def build_context(matched, setup, cv_preds, tools):
 
     # Finds the regions of TTN and then returns ctx
     ctx["ttn_regions"] = ttn_protein_regions()
+    # Finds the number of codons and adds it to ctx
+    ctx["n_codons"] = {g: len(t.coding) // 3 - 1 for g, t in load_transcripts.items()}
+
     return ctx
 
 # Near_far_auc measures how well the model ranks variants near its training data vs far from it, where far means more than
@@ -601,7 +604,7 @@ def scale_svg(score, baseline, width = 640):
       </svg>"""
 
 # Shows a column chart of different IG credits, with scores for each feature to compare how important different features were
-def ledger_svg(baseline, items, final, width = 640):
+def reasons_svg(baseline, items, final, width = 640):
 
         # Leaves an empty strip at the top, defines the area of the plot, and space for the left for arrow marks
         top, plot_h, left = 24, 150, 100
@@ -840,6 +843,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     # Finds each of the 3 model's scores
     models_text = ", ".join(pct(float(ig[f"score_model_{k}"])) for k in (1, 2, 3))
 
+   
     # Sets up the HTML page to make sure it is compatible, and also inserts the CSS block. html.escape() is used to properly
     # convert strings.
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -872,25 +876,103 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     <p>{html.escape(cal_text)}</p>
     {truth_html}
   </div>
+</section>
 
   {scale_svg(score, base)}
 
-   <!--Completeness axiom in words, to show how the score went from an average benign variant to its actual score->
+   <!--Completeness axiom in words, to show how the score went from an average benign variant to its actual score-->
    <h2>Why the model says this</h2>
    <p class="legend">Typical control = the average benign training variant of this gene and type, in this variant's own DNA window. Integrated Gradients splits the difference between it ({pct(base)}) and this variant ({pct(score)}) into one piece per reason; the pieces add up to the difference (gap {100 * gap:.2f} points). Each column is one reason in points: red columns push toward disease, blue columns toward benign.</p>
-   {ledger_svg(base, items, score)}
+   {reasons_svg(base, items, score)}
    <table><tr><th>Reason</th><th>What is true for this variant</th><th class="num">Effect</th></tr>{detail_rows}</table>
 
-   <!-- Where the model sits in the protein, how much to trust it, using flag(), and what other tools say.->
+   <!-- Where the model sits in the protein, how much to trust it, using flag(), and what other tools say.-->
    <h2>Where it sits in the protein</h2>
 {protein}
 <h2>How much to trust this</h2>
 {flag_html}
 <h2>What other tools say</h2>
 <table><tr><th>Tool</th><th class="num">Score</th><th>Published category</th></tr>{tool_rows}</table>
-<p class="legend">REVEL, CADD, AlphaMissense categories: In cross-validation on missense variants my model tied all three; on TTN stop codons it beat CADD.</p>
+<p class="legend">REVEL, CADD, AlphaMissense categories: references [4] and [7]. In cross-validation on missense variants my model tied all three; on TTN stop codons it beat CADD.</p>
+
+<!-- Footer: model, explanation method, limits, and every reference used on this page -->
+<div class="foot">
+<p><strong>Model:</strong> CardiacCNN (two-branch CNN on a 201-letter DNA window plus 49 biological features), 3 models trained on ClinVar [9] and gnomAD [10] variants.</p>
+<p><strong>Explanation:</strong> Integrated Gradients [1] computed with Captum [2]</p>
+<p><strong>Limits:
+<ol>
+<li>Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.</li>
+<li>Kokhlikyan N, et al. Captum: a unified and generic model interpretability library for PyTorch. arXiv:2009.07896, 2020.</li>
+<li>Richards S, et al. Standards and guidelines for the interpretation of sequence variants (ACMG/AMP). Genet Med 2015;17:405-424.</li>
+<li>Ioannidis NM, et al. REVEL: an ensemble method for predicting the pathogenicity of rare missense variants. Am J Hum Genet 2016;99:877-885.</li>
+<li>Rentzsch P, et al. CADD: predicting the deleteriousness of variants throughout the human genome. Nucleic Acids Res 2019;47:D886-D894.</li>
+<li>Cheng J, et al. Accurate proteome-wide missense variant effect prediction with AlphaMissense. Science 2023;381:eadg7492.</li>
+<li>Morales J, et al. A joint NCBI and EMBL-EBI transcript set for clinical genomics and research (MANE). Nature 2022;604:310-315.</li>
+<li>Landrum MJ, et al. ClinVar: improving access to variant interpretations and supporting evidence. Nucleic Acids Res 2018;46:D1062-D1067.</li>
+<li>Karczewski KJ, et al. The mutational constraint spectrum quantified from variation in 141,456 humans (gnomAD). Nature 2020;581:434-443.</li>
+<li>Roberts AM, et al. Integrated allelic, transcriptional, and phenomic dissection of the cardiac effects of titin truncations in health and disease. Sci Transl Med 2015;7:270ra6.</li>
+</ol>
+</div>
+</main></body></html>"""
+
+# Turns the made clinical reports into an HTML file that can be downloaded
+def write_reports(df, ig_table, setup, ctx, out_dir, show_truth = True, prefix = "R"):
+
+    # Creates an output directory for the user to recieve the file
+    os.makedirs(out_dir, exist_ok = True)
+
+    # Old pages are removed first in a folder, so a page from an earlier run that may have been using a different model
+    # doesn't become the final data
+    for old in os.listdir(out_dir):
+        if old.endswith(".html"):
+            os.remove(os.path.join(out_dir, old))
+
+    # Checks if the number of variants in a dataframe equals the number of explanation rows, and resets the indices
+    assert len(df) == len(ig_table), "one explanation row is needed per variant"
+    df, ig_table = df.reset_index(drop = True), ig_table.reset_index(drop = True)
+
+    # Runs several functions on all the variants at once instead of going one a a time. These functions are run
+    # so the clinical report works on my data.
+    raw = setup["raw"](df)
+    ann = annotate(df)
+    names = hgvs_names(df)
+    transcripts = load_transcripts()
+
+    # Timestamps the date the report was made
+    today = pd.Timestamp.today().strftime("%B %d, %Y").replace(" 0", " ")
+
+    index_rows = []
+    for i, row in df.iterrows():
+
+        # Copies the rows, finds the reference and alternate amino acids from the copied rows, the names, and transcript
+        r = row.copy()
+        r["ref_aa"], r["alt_aa"] = ann.loc[i, "ref_aa"], ann.loc[i, "alt_aa"]
+        n = names.loc[i].to_dict()
+        t = transcripts[row["gene"]]
+
+        # Finds the codon number using two cases, coding index if the variant is in the coding region, or using protein_frac
+        # to approximate it when the variant is intronic
+        n["codon"] = t.coding_index[int(row["pos"])] // 3 + 1 if int(row["pos"]) in t.coding_index else None
+        if n["codon"] is None and ann.loc[i, "protein_frac"] == ann.loc[i, "protein_frac"]:
+            n["codon"] = round(ann.loc[i, "protein_frac"] * len(t.coding)) // 3 + 1
+
+        # Constructs the report ID, using a prefix for the type of data, and an index for the number, like “D012”.
+        report_id = f"{prefix}{i + 1:03d}"
+
+        # If there is a label for the dataset, show it just on the report to see how the model did
+        truth = row["label"] if show_truth and "label" in row else None
+
+        # Builds the file name
+        file = f"{report_id}_{row['gene']}_{n['c'].replace('>', '-').replace('*', 'x')}.html"
+
+        with open(os.path.join(out_dir, file), "w", encoding = "utf-8") as fh:
+            fh.write(page)
+
+        # Summarizes
+        index_rows.append((report_id, file, row["gene"], n["c"], n["p"], row["consequence"], float(ig_table.loc[i, "score"]),
+                           "; ".join(short for _, short, _ in warnings), truth))
+
+        write_index(index_rows, out_dir, show_truth)
+        return index_rows
 
 
-</section>
-
-"""
