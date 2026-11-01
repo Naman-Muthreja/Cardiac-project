@@ -363,7 +363,7 @@ def describe(group, raw, typ, row, names):
         # is outside what the training variants cover 
         if raw["rel_pos"] < 0 or raw["rel_pos"] > 1:
             return (f"Outside the stretch of the gene that the training variants cover, so the model has never seen a "
-                    f"variant here. The typical control: {pct(typ['rel_pos'])}")
+                    f"variant here (typical control: {pct(typ['rel_pos'])} of the way along)")
 
         # Returns the relative position along that the variants cover, and compares it to the typical benign variant
         return (f"{pct(raw['rel_pos'])} of the way along the stretch of the gene that the training variants cover"
@@ -467,11 +467,11 @@ def flags(row, raw, ig, ctx):
 
         # Finds the number of benign TTN nonsense variants that also have PSI score > 0.9 to serve as a comparison group
         # for TTN nonsense variants that have PSI score > 0.9.
-        out.append(("limit", "Known TTN limit",
-                    f"Known limit. {ctx['ttn_high_controls']} of {ctx['ttn_controls']} benign controls in my data "
+        out.append(("limit", "TTN high-use exon",
+                    f"{ctx['ttn_high_controls']} of {ctx['ttn_controls']} benign controls in my data "
                     f"also carry a stop codon in a TTN exon the heart uses at least 90% of the time. Inside that "
                     f"group the model separates patients from controls only slightly better than chance "
-                    f"(AUC {ctx['ttn_high_auc']:.2f})"))
+                    f"(AUC {ctx['ttn_high_auc']:.2f})."))
 
     # Finds the distance to the intron. expm1 is to undo the ln + 1 used for data compression
     d = round(float(np.expm1(raw["tx_intron_dist"])))
@@ -498,8 +498,8 @@ def flags(row, raw, ig, ctx):
         # Returns the unfamiliar region and how well the cross-validation ranked variants that were this far, compared to variants
         # that were close
         out.append(("limit", "Unfamiliar region",
-                f"Unfamiliar region: this variant is {where}. In cross-validation the model ranked variants this far "
-                f"from its training data with AUC {ctx['far_auc']:.2f}, against {ctx['near_auc']:.2f} near it"))
+                f"This variant is {where}. In cross-validation the model ranked variants this far "
+                f"from its training data with AUC {ctx['far_auc']:.2f}, against {ctx['near_auc']:.2f} near it."))
 
     # Finds the number of fit variants inside each group
     n_fit = ctx["fit_counts"].get(cell,0)
@@ -508,7 +508,7 @@ def flags(row, raw, ig, ctx):
     # a caution message.
     if n_fit < 30:
         out.append(("caution", "Few training variants",
-                    f"Caution: Only {n_fit} training variants of this kind ({cell})."))
+                    f"Only {n_fit} training variants of this kind ({cell})."))
 
     # Gets the pathogenicity scores for each of the 3 models trained
     each = [float(ig[f"score_model_{k}"]) for k in (1, 2, 3)]
@@ -666,9 +666,7 @@ def reasons_svg(baseline, items, final, width = 640):
         # Adds up all of the bars' values
         total = sum(v for _, v in items)
         parts.append(f'<text x="{(left + width) / 2:.1f}" y="{height - 8}" text-anchor="middle" class="svg-strong">'
-                 f'Typical control {pct(baseline)}   +   all reasons {"+" if total > 0 else chr(8722)}{abs(100 * total):.0f} points   =   this variant {pct(final)}</text>')
-
-        # End tag, and joins the string into one
+                     f'Typical control {100 * baseline:.1f}% + all reasons {"+" if total > 0 else chr(8722)}{abs(100 * total):.1f} points   ≈   this variant {100 * final:.1f}%</text>')
         parts.append("</svg>")
         return "".join(parts)
 
@@ -721,7 +719,7 @@ CSS = """
 * { box-sizing: border-box; }
 body { margin: 0; background: #E9EDF2; color: var(--ink); font: 14px/1.5 "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; }
 .page { width: 8.5in; min-height: 11in; margin: 24px auto; background: #fff; padding: 0.55in 0.6in; box-shadow: 0 1px 3px rgba(22,33,58,.18); }
-h1, h2 { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; font-weight: 600; letter-spacing: 0; }
+h1, h2 { font-family: Cambria, "Times New Roman", serif; font-weight: 600; letter-spacing: 0; }
 h1 { font-size: 26px; line-height: 1.2; margin: 0; }
 h1 .gene { font-style: italic; }
 h2 { font-size: 16px; margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid var(--rule); }
@@ -730,7 +728,7 @@ h2 { font-size: 16px; margin: 22px 0 6px; padding-top: 10px; border-top: 1px sol
 .notice { color: var(--amber); font-weight: 600; }
 .ids { color: var(--muted); margin: 4px 0 0; }
 .call { display: grid; grid-template-columns: 1.1fr 1fr; gap: 22px; margin-top: 16px; align-items: start; }
-.big { font-family: Georgia, serif; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+.big { font-family: Cambria, "Times New Roman", serif; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums;}
 .verdict { font-size: 15px; margin: 6px 0 4px; }
 .classes { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 8px 0 4px; }
 .legend { font-size: 12px; color: var(--muted); }

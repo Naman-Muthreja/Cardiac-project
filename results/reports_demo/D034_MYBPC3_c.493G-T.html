@@ -10,7 +10,7 @@ h1 .gene { font-style: italic; }
 h2 { font-size: 16px; margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid var(--rule); }
 .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
 .top strong { color: var(--ink); font-size: 13px; }
-.notice { border: 1px solid var(--amber); color: var(--amber); padding: 2px 8px; border-radius: 3px; font-weight: 600; }
+.notice { color: var(--amber); font-weight: 600; }
 .ids { color: var(--muted); margin: 4px 0 0; }
 .call { display: grid; grid-template-columns: 1.1fr 1fr; gap: 22px; margin-top: 16px; align-items: start; }
 .big { font-family: Georgia, serif; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
@@ -28,7 +28,7 @@ th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px
 td { border-bottom: 1px solid var(--rule); padding: 5px 6px; vertical-align: top; }
 td.num { text-align: right; white-space: nowrap; }
 .up { color: var(--disease); font-weight: 600; } .down { color: var(--benign); font-weight: 600; }
-.flag { border-left: 2px solid var(--ink); padding: 2px 10px; margin: 8px 0; font-size: 13px; }
+.flag { padding: 2px 0; margin: 8px 0; font-size: 13px; }
 .flag strong { display: block; }
 a { color: var(--ink); }
 .foot { margin-top: 22px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--rule); padding-top: 8px; }
@@ -93,9 +93,9 @@ a { color: var(--ink); }
 
 <!-- Footer: model, explanation method, limits, and every reference used on this page -->
 <div class="foot">
-<p><strong>Model:</strong> CardiacCNN (two-branch CNN on a 201-letter DNA window plus 49 biological features), 3 models trained on ClinVar [9] and gnomAD [10] variants.</p>
+<p><strong>Model:</strong> CardiacCNN, 3 models trained on ClinVar [9] and gnomAD [10] variants.</p>
 <p><strong>Explanation:</strong> Integrated Gradients [1] computed with Captum [2].</p>
-<p><strong>Limits:</strong> Not validated for clinical use. A score is evidence about how this model behaves, not a diagnosis.</p>
+<p><strong>Limits:</strong> Not validated for clinical use.</p>
 <p><strong>References</strong></p>
 <ol>
 <li>Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. ICML 2017.</li>
