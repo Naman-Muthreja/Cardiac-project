@@ -20,7 +20,7 @@ EXTERNAL = os.path.join(HERE, "..", "data", "external")
 # Entrez utilities that includes ClinVar (searches for the VUS variants)
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 
-# Defines the gene regions,chromosone number and genomic positions
+# Defines the gene regions, chromosome number and genomic positions
 REGIONS = {"MYH7": ("14", 23380000, 23440000), "MYBPC3": ("11", 47330000, 47360000), "TTN": ("2", 178520000, 178820000)}
 
 # What to search ClinVar for
@@ -33,29 +33,29 @@ def ask(method, url, **kwargs):
     for attempt in range(4):
         r = requests.request(method, url, timeout = 300, **kwargs)
 
-        # Returns the answer r, if the error isn't 429 (too many requests) or 500 (the server itself broke)
+        # Returns the answer r, if the error isn't 429 (too many requests) or >500 (the server itself broke)
         if r.status_code != 429 and r.status_code < 500:
             r.raise_for_status()
             return r    
 
-        # Wait time before trying again in case of 429 or 500; wait time increases 
+        # Wait time before trying again in case of 429 or >500; wait time increases 
         time.sleep(3 * (attempt + 1) ** 2)
     r.raise_for_status()
 
 def region_sequence(gene):
 
-    # Finds the chromosome number, start, and end of gene's regionFor HTTP status codes below 500, excluding 429 (Too Many Requests), raise_for_status() raises an exception for unsuccessful responses, while successful responses are returned using return r. 
+    # Finds the chromosome number, start, and end ofgene
     chrom, start, end = REGIONS[gene]
 
-    # Makes the variant names using that data
+    # Builds the file path for that DNA stretch
     path = os.path.join(EXTERNAL, f"region_{gene}_{chrom}_{start}_{end}.txt")
 
-    # If the DNA sequence data with the reference letters are not in my data, so use ENSEMBL to get that data.
+    # If the DNA sequence data with the reference letters are not in my data, use ENSEMBL to get that data.
     if not os.path.exists(path):
         url = f"https://rest.ensembl.org/sequence/region/human/{chrom}:{start}..{end}:1?content-type=text/plain"
         r = ask("GET", url)
 
-        # Makes the directory, writes down that data without spaces at the two ends, using "w".
+        # Makes the directory, reads and writes down that data without spaces at the two ends, using "w".
         os.makedirs(EXTERNAL, exist_ok = True)
         with open(path, "w") as fh:
             fh.write(r.text.strip())
@@ -71,14 +71,14 @@ def search_vus(gene, consequence):
     term = (f'{gene}[gene] AND "clinsig vus"[Properties] AND "single nucleotide variant"[Type of variation] '
             f'AND "{consequence}"[molecular consequence]')
 
-    # Uses esearch to get the VUS variants info, **kwargs is taken advantage of because params are passed. Retxmax increases
+    # Uses esearch to get the VUS ID numbers, **kwargs is taken advantage of because params are passed. Retmax increases
     # the limit of how many IDs are returned. 
     r = ask("GET", EUTILS + "esearch.fcgi", params = {"db": "clinvar", "term": term, "retmode": "json", "retmax": 10000})
 
     # Sleeps to prevent overwhelming ClinVar
     time.sleep(0.5)                            
 
-    # Converts the text into a python dictionary
+    # Converts the idlist text into a python dictionary
     return r.json()["esearchresult"]["idlist"]
 
 def summaries(ids, gene):
@@ -90,13 +90,14 @@ def summaries(ids, gene):
         # Stores each batch into a chunk
         chunk = ids[start:start + 300]
 
-        # Combines all of those chunks and plugs it into ask(), searching fo rthe 
+        # Joins the 300IDs in this batch with a comma, and plugs it into ask(), searching for a summary of the VUS variant,
+        # including information like gene and molecular consequence, 
         r = ask("POST", EUTILS + "esummary.fcgi", data = {"db": "clinvar", "id": ",".join(chunk), "retmode": "json"})
 
         # Uses json to convert the results into python-friendly dictionaries
         result = r.json()["result"]
 
-        # For each userID in the chunk, get the results of that chunk and store it as "u", {} is a fallback
+        # For each ClinVar ID in the chunk, get the results of that chunk and store it as "u", {} is a fallback
         for uid in chunk:
             u = result.get(uid, {})
 
@@ -104,7 +105,7 @@ def summaries(ids, gene):
             # format, with a fallback if it doesn't work.
             spdi = (u.get("variation_set") or [{}])[0].get("canonical_spdi", "")
 
-            # Splits the SPDI format based on ":", meaning multiple parts are maade
+            # Splits the SPDI format based on ":", meaning multiple parts are made
             parts = spdi.split(":")
 
             # The amount of parts by the split should be 4, and the deletion and insertion should be 1 letter each
@@ -121,15 +122,13 @@ def summaries(ids, gene):
                          "clinvar_consequence": ";".join(u.get("molecular_consequence_list", [])),
                          "review": (u.get("germline_classification") or {}).get("review_status", ""),
                          "last_evaluated": (u.get("germline_classification") or {}).get("last_evaluated", "")})
-
-            # Pause and hand back
-            time.sleep(0.5)
-            return rows
+        time.sleep(0.5)
+    return rows
 
 # Fetches the VUS data
 def fetch_vus(path = os.path.join(EXTERNAL, "clinvar_vus.csv"), refresh = False):
 
-    # Reads the CSV
+    # Reads the CSV if the file is already saved and refresh is off
     if os.path.exists(path) and not refresh:
         return pd.read_csv(path, dtype = {"chrom": str})
     
@@ -153,4 +152,95 @@ def fetch_vus(path = os.path.join(EXTERNAL, "clinvar_vus.csv"), refresh = False)
     # Makes the directory, converts to a CSV, and returns it
     os.makedirs(EXTERNAL, exist_ok = True)
     vus.to_csv(path, index = False)
+    return vus
+
+# Returns the VUS dataframe with reference sequence and sequence columns
+def make_windows(vus):
+
+    # Makes a copy of the VUS dataframe, to be altered
+    vus = vus.copy()
+
+    ref_seqs, mut_seqs = [], []
+
+    for gene, pos, ref, alt in zip(vus["gene"], vus["pos"], vus["ref"], vus["alt"]):
+
+        # Chromosome number, start, and end of the gene is defined, then region_sequence is called to return the sequence
+        chrom, start, end = REGIONS[gene]
+        seq = region_sequence(gene)
+
+        # Turns the genome position into an integer position inside of seq, and stops the for loop if that position is
+        # within 100 bases of the edge, since that would mean the variant couldn't be in the middle position of 201 bp
+        i = int(pos) - start
+        assert 100 <= i <= len(seq) - 101, f"{gene} {pos} is too close to the edge of the downloaded region"
+
+        # Creates the DNA window, a:b excludes the final part of b, the variant is in the middle, and letters become uppercase
+        window = seq[i - 100:i + 101].upper()
+
+        # Makes sure the window is 100 letters to each side
+        assert window[100] == ref, f"{gene} {pos}: genome has {window[100]}, ClinVar says {ref}"
+
+        # Appends the reference and mutated sequence to the dataframe
+        ref_seqs.append(window)
+        mut_seqs.append(window[:100] + alt + window[101:])
+        vus["ref_sequence"], vus["sequence"] = ref_seqs, mut_seqs
+
+    return vus
+# Determines whether a ClinVar variant is missense, nonsense, or noncoding with my own code, and then checks 
+# with ClinVar to see if that is true. This validates that the features code from the CNN is reading the new variants correctly.
+def assign_consequence(vus, check = True):
+
+    # Calls the annotate function from model_extra_features, determining details like the amino acid for ref and alt, and 
+    # if the exon is coding or not.
+    ann = annotate(vus)
+
+    kind = []
+
+    # For the coding sequence, reference amino acid, and alternate amino acid, detemine the kind of variant,
+    # using if statements to determine the consequence of the variant (like a * indicating nonsense).
+    for in_cds, a, b in zip(ann["in_cds"], ann["ref_aa"], ann["alt_aa"]):
+        if in_cds and isinstance(a, str) and isinstance(b, str):
+            kind.append("nonsense" if b == "*" else ("synonymous" if a == b else "missense"))
+        elif in_cds:
+            kind.append("unknown")                    
+        else:
+            kind.append("noncoding")
+    vus = vus.assign(consequence = kind)
+
+    # If check is True, define expected to be the three types fo expected consequences, and checkable to be those consequences
+    # that can be checked (not unknown)
+    if check:
+        expected = {"missense": "missense variant", "nonsense": "nonsense"}
+        checkable = vus["consequence"].isin(expected)
+
+
+        # Finds the number of variants that agree with ClinVar based on consequence, prints it, and stops the code 
+        # if that number's mean is not > 0.98
+        agree = [expected[k] in c for k, c in zip(vus.loc[checkable, "consequence"], vus.loc[checkable, "clinvar_consequence"])]
+        print(f"Consequence check: my call matches ClinVar for {np.mean(agree):.1%} of {int(checkable.sum())} coding VUS")
+        assert np.mean(agree) > 0.98, "my consequence calls disagree with ClinVar"
+
+    return vus
+
+def load_vus(full_dataset, keep_cells = ("MYH7/missense", "MYBPC3/missense", "MYBPC3/noncoding", "TTN/nonsense")):
+
+    # Fetches the VUS data, makes the genomic windows, and assigns the consequences
+    vus = assign_consequence(make_windows(fetch_vus()))
+
+    # A lambda function gets all the unique VUS IDs
+    key = lambda d: d["chrom"].astype(str) + ":" + d["pos"].astype(str) + d["ref"] + ">" + d["alt"]
+
+    # Gets all the IDs of my full dataset and put it into a set called "known"
+    known = set(key(full_dataset))
+
+    # To prevent data leakage, remove all VUS variants that were in the built dataset (could have been reclassified).
+    # Then, reset the index for the remaining VUS variants
+    vus = vus[~key(vus).isin(known)]
+    vus = vus[(vus["gene"] + "/" + vus["consequence"]).isin(keep_cells)].reset_index(drop = True)
+
+    # Describe the label column as "VUS" and "chrom" as the integer chromosome number
+    vus["label"] = "VUS"
+    vus["chrom"] = vus["chrom"].astype(int)
+
+    # Print out the amount of VUS variants ready
+    print(f"{len(vus)} VUS ready:", (vus["gene"] + "/" + vus["consequence"]).value_counts().to_dict())
     return vus
