@@ -134,7 +134,7 @@ def make_regions_split (df, block_size = 3000, seed = 1, test_frac = 0.15, val_f
 # Takes the minimum gap between two variants, later to be compared with window to see if make_regions_split is working
 def min_gap(a_df, b_df):
 
-    # For the each set of genes, if the length is 0, move on
+    # For the each set of genes, if the length is 0, move on to the next set
     worst = np.inf
     for g in set(a_df["gene"]) & set(b_df["gene"]):
         a = np.sort(a_df[a_df["gene"] == g]["pos"].values)
@@ -179,7 +179,7 @@ def within_stratum_auc(df, probs, min_cell = 10, verbose = True):
     weighted_sum = 0.0
     total_weight = 0
 
-    # Takes the gene, consequence pairs, and labels the pathogenic
+    # Takes the gene, consequence pairs, and labels the pathogenic variants
     for (gene, cons), cell in df.groupby(["gene", "consequence"]):
         y = (cell["label"] != "Benign").astype(int).to_numpy()
 
@@ -313,6 +313,7 @@ def predict(models, X, features, device):
         probs = [torch.softmax(m(X.to(device), features.to(device)), dim = 1).cpu().numpy() for m in models]
     return np.mean(probs, axis = 0)
 
+# Trains the model and returns data like AUC-ROC, confusion matrix, andnd classification_report
 def train_model(df, epochs = 80, batch_size = 32, lr = 7e-4, weight_decay = 3e-4, seed = 49,
                 n_models = 3, evaluate_test = True):
     
@@ -341,7 +342,6 @@ def train_model(df, epochs = 80, batch_size = 32, lr = 7e-4, weight_decay = 3e-4
     # Returns amount of training/fitting rows and the counts of class for double checking
     print(f"Fitting on {len(fit_df)} rows, {F_fit.shape[1]} features per row")
     print("Counts of each class:", dict(zip(LABELS, np.bincount(y_fit.numpy(), minlength = 3).tolist())))
-
 
     models = []
     for k in range(n_models):

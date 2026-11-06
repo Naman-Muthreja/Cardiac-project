@@ -840,6 +840,12 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
     # Finds the protein change if possible (intronic variants don't change the protein)
     p_part = f" ({html.escape(names['p'])})" if names["p"] else ""
 
+    # Checks if the variant is intronic, if so, finds the 
+    if raw["tx_intronic"] > 0:
+        where = f"intron {names['exon'] if '+' in names['c'] else names['exon'] - 1}"
+    else:
+        where = f"exon {names['exon']} of {names['n_exons']}"
+
     # Finds each of the 3 model's scores
     models_text = ", ".join(pct(float(ig[f"score_model_{k}"])) for k in (1, 2, 3))
 
@@ -855,7 +861,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 
 <!-- Gene and genomic information -->
 <h1><span class="gene">{html.escape(gene)}</span> {html.escape(names['c'])}{p_part}</h1>
-<p class="ids">{html.escape(MANE[gene][1])}, GRCh38 chr{row['chrom']}:{int(row['pos']):,} {row['ref']}&gt;{row['alt']}, {html.escape(cons)}, exon {names['exon']} of {names['n_exons']}</p>
+<p class="ids">{html.escape(MANE[gene][1])}, GRCh38 chr{row['chrom']}:{int(row['pos']):,} {row['ref']}&gt;{row['alt']}, {where}</p>
 
 <section class="call">
    
@@ -1013,9 +1019,7 @@ def write_index(rows, out_dir, show_truth):
     # Saves the index page next to the reports
     with open(os.path.join(out_dir, "index.html"), "w", encoding = "utf-8") as fh:
         fh.write(page)
-
     
-
 # Warning table returns the different warnings found by flags in one table
 def warning_table(df, ig_table, setup, ctx):
     df = df.reset_index(drop = True)

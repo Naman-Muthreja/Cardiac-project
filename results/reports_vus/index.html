@@ -1,0 +1,37 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>Variant reports</title><style>
+:root { --ink:#16213A; --muted:#5B6577; --rule:#D9DEE5; --panel:#F4F6F9; --disease:#B3261E; --benign:#1A5FB4; --amber:#8A5A12; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #E9EDF2; color: var(--ink); font: 14px/1.5 "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.page { width: 8.5in; min-height: 11in; margin: 24px auto; background: #fff; padding: 0.55in 0.6in; box-shadow: 0 1px 3px rgba(22,33,58,.18); }
+h1, h2 { font-family: Cambria, "Times New Roman", serif; font-weight: 600; letter-spacing: 0; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0; }
+h1 .gene { font-style: italic; }
+h2 { font-size: 16px; margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+.top strong { color: var(--ink); font-size: 13px; }
+.notice { color: var(--amber); font-weight: 600; }
+.ids { color: var(--muted); margin: 4px 0 0; }
+.call { display: grid; grid-template-columns: 1.1fr 1fr; gap: 22px; margin-top: 16px; align-items: start; }
+.big { font-family: Cambria, "Times New Roman", serif; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums;}
+.verdict { font-size: 15px; margin: 6px 0 4px; }
+.classes { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 8px 0 4px; }
+.legend { font-size: 12px; color: var(--muted); }
+.panel { background: var(--panel); border-radius: 6px; padding: 10px 14px; font-size: 13px; }
+.panel p { margin: 4px 0; }
+.svg-small { font: 11px "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--muted); }
+.svg-strong { font: 600 12px "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); }
+.svg-small, .svg-strong { paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+.svg-bold { font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--rule); padding: 4px 6px; }
+td { border-bottom: 1px solid var(--rule); padding: 5px 6px; vertical-align: top; }
+td.num { text-align: right; white-space: nowrap; }
+.up { color: var(--disease); font-weight: 600; } .down { color: var(--benign); font-weight: 600; }
+.flag { padding: 2px 0; margin: 8px 0; font-size: 13px; }
+.flag strong { display: block; }
+a { color: var(--ink); }
+.foot { margin-top: 22px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.foot p { margin: 3px 0; }
+.foot ol { margin: 2px 0 0; padding-left: 18px; }
+@media print { body { background: #fff; } .page { margin: 0; box-shadow: none; width: auto; min-height: 0; } h2, .call, table { break-inside: avoid; } }
+</style></head><body><main class='page'><h1>Variant explanation reports</h1><p class='ids'>15 variants, sorted by highest model scores at the top. Research use only.</p><table><tr><th>Report</th><th>Gene</th><th>Variant</th><th>Type</th><th class='num'>Model</th><th>Warnings</th></tr><tr><td><a href='V006_MYH7_c.2108G-C.html'>V006</a></td><td><em>MYH7</em></td><td>c.2108G&gt;C p.Arg703Pro</td><td>missense</td><td class='num'>>99%</td><td>none</td></tr><tr><td><a href='V007_MYH7_c.1325G-C.html'>V007</a></td><td><em>MYH7</em></td><td>c.1325G&gt;C p.Arg442Pro</td><td>missense</td><td class='num'>>99%</td><td>none</td></tr><tr><td><a href='V008_MYH7_c.1106G-C.html'>V008</a></td><td><em>MYH7</em></td><td>c.1106G&gt;C p.Arg369Pro</td><td>missense</td><td class='num'>>99%</td><td>none</td></tr><tr><td><a href='V001_MYBPC3_c.822-2A-G.html'>V001</a></td><td><em>MYBPC3</em></td><td>c.822-2A&gt;G </td><td>noncoding</td><td class='num'>98%</td><td>Canonical splice site</td></tr><tr><td><a href='V002_MYBPC3_c.908+3A-G.html'>V002</a></td><td><em>MYBPC3</em></td><td>c.908+3A&gt;G </td><td>noncoding</td><td class='num'>97%</td><td>none</td></tr><tr><td><a href='V003_MYBPC3_c.26-2A-G.html'>V003</a></td><td><em>MYBPC3</em></td><td>c.26-2A&gt;G </td><td>noncoding</td><td class='num'>97%</td><td>Canonical splice site</td></tr><tr><td><a href='V011_TTN_c.36058C-T.html'>V011</a></td><td><em>TTN</em></td><td>c.36058C&gt;T p.Gln12020Ter</td><td>nonsense</td><td class='num'>50%</td><td>none</td></tr><tr><td><a href='V012_TTN_c.33009T-G.html'>V012</a></td><td><em>TTN</em></td><td>c.33009T&gt;G p.Tyr11003Ter</td><td>nonsense</td><td class='num'>47%</td><td>none</td></tr><tr><td><a href='V013_TTN_c.27587C-G.html'>V013</a></td><td><em>TTN</em></td><td>c.27587C&gt;G p.Ser9196Ter</td><td>nonsense</td><td class='num'>47%</td><td>none</td></tr><tr><td><a href='V005_MYBPC3_c.26-13C-A.html'>V005</a></td><td><em>MYBPC3</em></td><td>c.26-13C&gt;A </td><td>noncoding</td><td class='num'>13%</td><td>none</td></tr><tr><td><a href='V004_MYBPC3_c.1927+424C-T.html'>V004</a></td><td><em>MYBPC3</em></td><td>c.1927+424C&gt;T </td><td>noncoding</td><td class='num'>10%</td><td>none</td></tr><tr><td><a href='V015_TTN_c.11231C-G.html'>V015</a></td><td><em>TTN</em></td><td>c.11231C&gt;G p.Ser3744Ter</td><td>nonsense</td><td class='num'>4%</td><td>none</td></tr><tr><td><a href='V014_TTN_c.10493G-A.html'>V014</a></td><td><em>TTN</em></td><td>c.10493G&gt;A p.Trp3498Ter</td><td>nonsense</td><td class='num'>3%</td><td>none</td></tr><tr><td><a href='V010_MYH7_c.5499C-A.html'>V010</a></td><td><em>MYH7</em></td><td>c.5499C&gt;A p.Asn1833Lys</td><td>missense</td><td class='num'>2%</td><td>none</td></tr><tr><td><a href='V009_MYH7_c.5394C-A.html'>V009</a></td><td><em>MYH7</em></td><td>c.5394C&gt;A p.Asp1798Glu</td><td>missense</td><td class='num'>2%</td><td>none</td></tr></table></main></body></html>
