@@ -252,7 +252,7 @@ def calibration(ctx, cell, score):
     rows = ctx["cv_rows"][ctx["cv_rows"]["cell"] == cell]
 
     # Puts variants into 5 different bins, using the floor function. The bins range from a range from 0% - 20%
-    # pathogenicity scores to 80% - 100%, and selects the bin for the current variant
+    # pathogenicity scores to 80% - 100%, and this selects the bin for the current variant
     low = min(np.floor(score*5) / 5, 0.8)
 
     # Selects predictions based on the score ranges assigned by "low", and places them into variable "near"
