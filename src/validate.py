@@ -89,7 +89,7 @@ def cv_explanations(matched, steps = 128, batch_size = 64, path = os.path.join(R
             # Print out the amount of variants saved, the worst completeness gap, and whether that gap passes
             print(f"cv seed {cv_seed} fold {f}: {len(held)} missense explained, completeness gap {gap:.4f}")
             
-            print(f"Largest completeness gap over all folds: {worst:.4f}")
+    print(f"Largest completeness gap over all folds: {worst:.4f}")
     assert worst < 0.01, "completeness failed"
 
     # Concatenates the rows together
