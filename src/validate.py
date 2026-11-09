@@ -1,7 +1,8 @@
 """
 validate.py is a validation script, conducting several checks, such as aggregate localization rate, which is how often
-the variant's position is among the most credited DNA positions, and a Mann-Whitney U test (pass with p < 0.01) 
-to see if the attribution is higher in a known protein domain like the MYH7 motor domain, than outside of it.
+the variant's position is among the most credited DNA positions, and a Mann-Whitney U test (pass with p < 0.01) comparing
+variants inside of these important domains vs without to see if the attribution is higher in a known protein domain like
+the MYH7 motor domain, than outside of it. Also returns several other important comparison metrics to test out hypothesis 2.
 """
 
 import os
@@ -63,7 +64,7 @@ def cv_explanations(matched, steps = 128, batch_size = 64, path = os.path.join(R
             dna, feat, p, p0, delta = explain.integrated_gradients([model], X_all[held], F_held, x_base,
                                                                     f_base,steps = steps, batch_size = batch_size)
 
-           # Total credit (DNA + features) minus (score − baseline score) should be about 0. This keeps the worst gap.
+            # Total credit (DNA + features) minus (score − baseline score) should be about 0. This keeps the worst gap.
             gap = (dna.sum(dim = (1, 2)) + feat.sum(dim = 1) - (p - p0)).abs().max().item()
             worst = max(worst, gap)
 
@@ -85,36 +86,108 @@ def cv_explanations(matched, steps = 128, batch_size = 64, path = os.path.join(R
             out["score"], out["cv_seed"] = p.numpy(), cv_seed
             pieces.append(out)
 
-        # Print out the amount of variants saved, the worst completeness gap, and whether that gap passes
-        print(f"cv seed {cv_seed} fold {f}: {len(held)} missense explained, completeness gap {gap:.4f}")
-        print(f"Largest completeness gap over all folds: {worst:.4f}")
-        assert worst < 0.01, "completeness failed"
+            # Print out the amount of variants saved, the worst completeness gap, and whether that gap passes
+            print(f"cv seed {cv_seed} fold {f}: {len(held)} missense explained, completeness gap {gap:.4f}")
+            
+            print(f"Largest completeness gap over all folds: {worst:.4f}")
+    assert worst < 0.01, "completeness failed"
 
-        # Concatenates the rows together
-        rows = pd.concat(pieces, ignore_index = True)
+    # Concatenates the rows together
+    rows = pd.concat(pieces, ignore_index = True)
 
-        # Defines the keys to read by and then groups the rows and averages the credits 
-        # over the 3 cross-validations
-        keys = ["chrom", "pos", "ref", "alt", "gene", "label"]
-        v = rows.groupby(keys, as_index = False)[["Position in the protein", "Amino-acid change", "Position along the gene", "score"]].mean()
+    # Defines the keys to read by and then groups the rows and averages the credits 
+    # over the 3 cross-validations
+    keys = ["chrom", "pos", "ref", "alt", "gene", "label"]
+    v = rows.groupby(keys, as_index = False)[["Position in the protein", "Amino-acid change", "Position along the gene", "score"]].mean()
 
-        # Adds two new columns row by row into a new column called "protein_level"
-        v["protein_level"] = v["Position in the protein"] + v["Amino-acid change"]
+    # Adds two new columns row by row into a new column called "protein_level"
+    v["protein_level"] = v["Position in the protein"] + v["Amino-acid change"]
 
-        transcripts = load_transcripts()
+    transcripts = load_transcripts()
 
-        # Using coding indices, gets the position, the codon number, and uses it for the domain.
-        def domain(transcripts, gene, pos):
-            ci = transcripts[gene].coding_index.get(int(pos))
-            if ci is None:
-                return None
-            codon = ci // 3 + 1  # Transcript map counts from 0, but codons count from 1
+    # Using coding indices, gets the position, the codon number, and uses it for the domain.
+    def domain(transcripts, gene, pos):
+        ci = transcripts[gene].coding_index.get(int(pos))
+        if ci is None:
+            return None
+        codon = ci // 3 + 1  # Transcript map counts from 0, but codons count from 1
 
-            return next((name for a, b, name in report.DOMAINS[gene] if a <= codon <= b), "outside")
+        return next((name for a, b, name in report.DOMAINS[gene] if a <= codon <= b), "outside")
 
-        # Adds domain as a column by calling on it, saves v as a csv
-        v["domain"] = [domain(g, p) for g, p in zip(v["gene"], v["pos"])]
-        v.to_csv(path, index = False)
+    # Adds domain as a column by calling on it, saves v as a csv
+    v["domain"] = [domain(transcripts, g, p) for g, p in zip(v["gene"], v["pos"])]
+    v.to_csv(path, index = False)
 
-        print(f"Saved {len(v)} held-out missense variants to {path} in ({time.time() - t0:.0f} seconds)")
-        return v
+    print(f"Saved {len(v)} held-out missense variants to {path} in ({time.time() - t0:.0f} seconds)")
+    return v
+    
+# Determines whether motor-domain variants get more protein-level credit than the other MYH7 variants, by comparing the 
+# IG credits in pairs, one selected from each group
+def mann_whitney(a, b, label):
+
+    # 'a' is the group of motor-domain variants, and b is the array of non-motor-domain variants, and both are 
+    # converted to an array of decimals of their credits
+    a, b = np.asarray(a, dtype = float), np.asarray(b, dtype= float)
+
+    # If there is less than 10 in a group, the amount of variants is too low and meaningless to test anyways
+    if min(len(a), len(b)) < 10:
+        print(f"{label}: too few to test ({len(a)} vs {len(b)})")
+        return {"test": label, "n_a": len(a), "n_b": len(b), "p": np.nan}
+
+    # Uses scipy's mannwhitneyu() function to conduct the test; "greater" is for calculating a one-sided test (which side is greater?)
+    u, p = mannwhitneyu(a, b, alternative = "greater")
+
+    # Prints and returns the length of motor-domain vs non-motor-domain variants, the median scores of the motor domain vs rest
+    # to illustrate the difference in credits, the amount of pairs where motor-domain variants had a higher number of credits,
+    #  and the probability that the test occured through random chance.
+    print(f"{label}: n {len(a)} vs {len(b)}, median {np.median(a):+.3f} vs {np.median(b):+.3f}, U = {u:.0f}, one-sided p = {p:.2e}")
+    return {"test": label, "n_a": len(a), "n_b": len(b), "median_a": float(np.median(a)), "median_b": float(np.median(b)),
+            "U": float(u), "p": float(p)}
+
+# tests out hypothesis 2 of my research plan, that the highest attribution scores by Integrated Gradients applied to the model
+# will correlate with clinically important domains, such as the myosin motor domain in MYH7, rather than genomic noise.
+def hypothesis_2(v, path = os.path.join(RESULTS, "h2_results.csv")):
+
+    # Specifically focuses on MYH7 due to its prevalent motor domain
+    myh7 = v[v["gene"] == "MYH7"]
+
+    # Motor domain vs everything else
+    motor, rest = myh7[myh7["domain"] == "Motor domain"], myh7[myh7["domain"] != "Motor domain"]
+
+    # Prints out the MYH7 variants by domain (coiled rod, motor domain, etc)
+    print("MYH7 missense by domain:", myh7["domain"].value_counts().to_dict())
+
+    # Prints out the number of counts of each label (HCM, DCM, Benign) in the motor domain
+    print("Label mix: motor", motor["label"].value_counts().to_dict(), "| rest", rest["label"].value_counts().to_dict())
+
+    # Protein-level credit, amino acid change, and position in the protein, are compared between the motor variants 
+    # and rest of the variants
+    tests = [mann_whitney(motor["protein_level"], rest["protein_level"], "PRIMARY: protein-level credit, motor vs rest")]
+    tests.append(mann_whitney(motor["Amino-acid change"], rest["Amino-acid change"], "amino-acid change alone"))
+    tests.append(mann_whitney(motor["Position in the protein"], rest["Position in the protein"], "position in the protein alone"))
+
+
+    # Pathogenic is all non-benign labels, and benign includes the benign labels
+    pathogenic = lambda d: d[d["label"] != "Benign"]
+    benign = lambda d: d[d["label"] == "Benign"]
+
+    # Protein level for pathogenic and benign are both appended to tests
+    tests.append(mann_whitney(pathogenic(motor)["protein_level"], pathogenic(rest)["protein_level"], "pathogenic only"))
+    tests.append(mann_whitney(benign(motor)["protein_level"], benign(rest)["protein_level"], "benign only (control)"))
+
+    # Filters for the MYBPC3 gene, and appends to "tests" the protein level between MYBPC3 C domain vs non C domain variants
+    mybpc3 = v[v["gene"] == "MYBPC3"]
+    tests.append(mann_whitney(mybpc3[mybpc3["domain"] != "outside"]["protein_level"],
+                              mybpc3[mybpc3["domain"] == "outside"]["protein_level"], "MYBPC3 C-domains vs outside"))
+
+    # All tests in one dataframe, the probability of results being chance has to be less than 0.01 to be considered "passed"
+    table = pd.DataFrame(tests)
+    table.to_csv(path, index = False)
+    passed = table.loc[0, "p"] < 0.01
+    print(f"Hypothesis 2 as pre-registered: {'PASSES' if passed else 'does not pass'} (p = {table.loc[0, 'p']:.2e}, needs < 0.01)")
+    return table
+
+
+
+
+

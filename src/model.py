@@ -6,7 +6,6 @@ import torch.nn as nn
 
 
 # CardiacCNN reads the genomic window, converts it into just 16 numbers, and uses these numbers to give one score per variant class.
-# Note that unlike the previous pooling, CardiacPoolNet does not have the error of too many weights for a little amount of rows, so it is less prone to overfitting
 class CardiacCNN(nn.Module):
 
     # Initializes the model. Conv_dropout reduces model dependencies on certain weights.
