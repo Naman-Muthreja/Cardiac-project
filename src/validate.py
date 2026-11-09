@@ -187,6 +187,42 @@ def hypothesis_2(v, path = os.path.join(RESULTS, "h2_results.csv")):
     print(f"Hypothesis 2 as pre-registered: {'PASSES' if passed else 'does not pass'} (p = {table.loc[0, 'p']:.2e}, needs < 0.01)")
     return table
 
+# Returns an array of the per-position DNA credit, adding up the 4 channels
+def position_credit(dna):
+    return np.abs(np.asarray(dna)).sum(axis = 1)
+
+def localization_rate(models, df, F, typical, top_k = 5, steps = 64, batch_size = 64):
+
+    # Prepares the sequence of DNA letters and the baseline
+    X, _ = train.prepare_tensors(df)
+    x_ref, f_base = explain.baselines(df, F, t ypical)
+
+    # For each reference baseline (benign and 0)
+    for name, x_base in [("reference", x_ref), ("zero", torch.zeros_like(X))]:
+
+        # Calculates integrated gradients on the data and gets the per-position DNA credit
+        dna, feat, p, p0, delta = explain.integrated_gradients(models, X, F, x_base, f_base, steps = steps, batch_size = batch_size)
+        credit = position_credit(dna.numpy())
+
+        # The number of positions that ranked higher than the variant, summing up the amount of "True" values returned
+        rank = (credit > credit[:, [100]]).sum(axis = 1)            
+
+        # Calculates the rate of variants ranking in the top 5 positions
+        rate = float((rank < top_k).mean())
+
+        # Finds the percent of IG credits made up by variants near the variant's position (within 5 bases)
+        near = float((credit[:, 95:106].sum(axis = 1) / np.maximum(credit.sum(axis = 1), 1e-12)).mean())
+
+        # Calculates how much attribution comes from DNA features vs the features (as a percent)
+        dna_share = float((np.abs(dna.numpy()).sum(axis = (1, 2)) /
+                           (np.abs(dna.numpy()).sum(axis = (1, 2)) + np.abs(feat.numpy()).sum(axis = 1))).mean())
+
+        # Returns the metrics found, adding to both "out" and a print statement.
+        out[name] = {"rate": rate, "chance": top_k / 201, "share_within_5": near, "dna_share_of_credit": dna_share}
+        print(f"Localization, {name} baseline: variant position in the top {top_k} of 201 for {rate:.1%} of {len(df)} "
+              f"variants (chance {top_k / 201:.1%}); {near:.1%} of the DNA credit is within 5 letters of it; "
+              f"the DNA branch holds {dna_share:.1%} of all credit")
+    return out
 
 
 
