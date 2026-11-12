@@ -1,0 +1,36 @@
+{
+  "h2_primary_p": 2.949417401343309e-11,
+  "h2_passes": true,
+  "localization": {
+    "reference": {
+      "rate": 1.0,
+      "chance": 0.024875621890547265,
+      "share_within_5": 0.991253674030304,
+      "dna_share_of_credit": 0.004870442673563957
+    },
+    "zero": {
+      "rate": 0.014577259475218658,
+      "chance": 0.024875621890547265,
+      "share_within_5": 0.05430959537625313,
+      "dna_share_of_credit": 0.24975675344467163
+    }
+  },
+  "gates": {
+    "completeness_largest_gap": 0.003793001174926758,
+    "ablation_same_sign": 0.9902818270165209,
+    "ablation_r": 0.8888178379128417,
+    "randomization": {
+      "untrained model": [
+        0.07408231368186874,
+        0.22157434402332363
+      ],
+      "shuffled-label model": [
+        0.03626251390433815,
+        0.13119533527696792
+      ]
+    },
+    "planted_feature": 0.9854227304458618,
+    "planted_motif_share": 0.5591249465942383,
+    "planted_motif_peak": 65
+  }
+}

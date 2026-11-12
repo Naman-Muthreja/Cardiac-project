@@ -12,6 +12,44 @@ from explain import GROUPS, groups_for
 from train import make_regions_split, block_folds
 from model_extra_features import load_transcripts, annotate, load_ttn_exons, MANE, COMPLEMENT, CODON_TABLE
 
+# The inputs behind each reason, in plain words, so a clinician can see what each subscore is made from (Dr. Landstrom's advice)
+INPUTS = {
+    "Splice-site distance": "how far the variant is from the nearest exon edge, and whether it is in an intron",
+    "Position in the protein": "how far along the protein the change is",
+    "Position along the gene": "how far along the gene the variant is",
+    "Exon number and NMD": "how far along the exons, and whether it escapes nonsense-mediated decay",
+    "Heart use of this TTN exon": "how often the heart uses this exon (PSI, two sources)",
+    "TTN isoforms": "which titin isoforms include this exon (N2BA, N2B, N2A, novex-3)",
+    "Titin region": "Z-disk, I-band, A-band or M-band",
+    "Which TTN exon this is": "heart use of the exon, isoforms, titin region, exon number and splice distance",
+    "Amino-acid change": "how different the old and new amino acids are (size, charge, how often one swaps for the other), and changes to proline, glycine or cysteine",
+    "DNA letters": "the original letter and the new letter",
+    "Mutation-rate signals": "transition or not, CpG site or not",
+    "Gene and variant type": "which gene, and missense, stop codon or noncoding",
+    "DNA sequence (CNN branch)": "the 201-letter DNA window around the variant, read by the CNN",
+}
+
+# Plain names for each of the 49 inputs and the CNN
+FEATURE_NAMES = {
+    "tx_intronic": "in an intron", "tx_intron_dist": "distance into the intron",
+    "tx_exon_edge_dist": "distance to the exon edge", "tx_in_cds": "in the protein-coding part",
+    "tx_protein_frac": "position along the protein", "tx_prot_MYH7": "position along the protein (MYH7)",
+    "tx_prot_MYBPC3": "position along the protein (MYBPC3)", "tx_prot_TTN": "position along the protein (TTN)",
+    "rel_pos": "position along the gene", "rel_MYH7": "position along the gene (MYH7)",
+    "rel_MYBPC3": "position along the gene (MYBPC3)", "rel_TTN": "position along the gene (TTN)",
+    "tx_exon_frac": "exon number (how far along)", "tx_last_exon": "last exon", "tx_nmd_escape": "escapes nonsense-mediated decay",
+    "ttn_psi_dcm": "heart use of exon (DCM hearts)", "ttn_psi_gtex": "heart use of exon (healthy hearts)",
+    "ttn_in_n2ba": "in N2BA isoform", "ttn_in_n2b": "in N2B isoform", "ttn_in_n2a": "in N2A isoform", "ttn_in_novex3": "in novex-3 isoform",
+    "ttn_A-band": "A-band", "ttn_I-band": "I-band", "ttn_Z-disk": "Z-disk", "ttn_M-band": "M-band",
+    "aa_grantham": "Grantham distance", "aa_blosum": "BLOSUM62", "aa_hydro": "hydropathy change", "aa_volume": "volume change",
+    "aa_charge": "charge change", "aa_to_pro": "change to proline", "aa_gly": "glycine involved", "aa_cys": "cysteine involved",
+    "ref_A": "original letter A", "ref_C": "original letter C", "ref_G": "original letter G", "ref_T": "original letter T",
+    "alt_A": "new letter A", "alt_C": "new letter C", "alt_G": "new letter G", "alt_T": "new letter T",
+    "transition": "transition", "cpg": "CpG site",
+    "g_MYH7": "gene MYH7", "g_MYBPC3": "gene MYBPC3", "g_TTN": "gene TTN",
+    "c_missense": "missense", "c_nonsense": "stop codon", "c_noncoding": "noncoding",
+    "dna_attribution_total": "201-letter DNA window (CNN)",
+}
 
 # Converts each one letter abbreviation for an amino acid to a three letter short form
 THREE = dict(A="Ala", R="Arg", N="Asn", D="Asp", C="Cys", Q="Gln", E="Glu", G="Gly", H="His", I="Ile", L="Leu",
@@ -145,6 +183,9 @@ def build_context(matched, setup, cv_preds, tools):
     ctx = {"typical_raw": {c: raw_fit[(cell_fit == c) & benign_fit].mean() for c in cell_fit.unique()},
            "fit_counts": cell_fit.value_counts().to_dict(),
            "fit_pos": {c: np.sort(part["pos"].to_numpy()) for c, part in fit_df.groupby(cell_fit)}}
+    
+    # Positions and labels (disease-causing or not) of the training variants of each kind
+    ctx["fit_lab"] = {c: (part["pos"].to_numpy(), part["label"].ne("Benign").to_numpy()) for c, part in fit_df.groupby(cell_fit)}
 
     # Assigns pathogenicity prediction scores for each gene-consequence pair ("cell")
     rows = cv_preds.assign(model = 1 - cv_preds["p_benign"], cell = cv_preds["gene"] + "/" + cv_preds["consequence"])
@@ -455,7 +496,7 @@ def describe(group, raw, typ, row, names):
 
     if group == "DNA sequence (CNN branch)":
         return "Pattern the convolutional branch read in the 201-letter DNA window around the mutation"
-    return "DNA Sequence group not founded"
+    return "DNA Sequence group not found"
 
 # Flags variants based on rules, limits, or cautions
 def flags(row, raw, ig, ctx):
@@ -812,16 +853,28 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 
     detail_rows = ""
 
+    # Which inputs belong to each reason, for this gene (NEW)
+    cols_for = groups_for(gene)
+
     # For each score and feature, if the feature is everything else, move on, otherwise find the correct color and 
     # display its attribution score and description. 
-    # For example, “Splice-site distance”, “In an intron, two letters from the edge of exon 4”, “+32 pts” is a possible row.
+    # For example, for item “Splice-site distance”, “In an intron, two letters from the edge of exon 4”, “+32 pts” is a possible row.
     for g, v in items:
         if g == "Everything else":
             continue
         cls = "up" if v > 0 else "down"
-        detail_rows += (f"<tr><td>{html.escape(g)}</td><td>{html.escape(describe(g, raw, typ, row, names))}</td>"
-                        f"<td class='num {cls}'>{'+' if v > 0 else '-'}{abs(100 * v):.1f} pts</td></tr>")
 
+        # The reason's own inputs, with the highest scores going first. Inputs under 0.05 points are left out 
+        pieces = sorted(cols_for[g], key = lambda c: -abs(float(ig[c])))
+        split = ", ".join(f"{FEATURE_NAMES.get(c, c)} {100 * float(ig[c]):+.1f}" for c in pieces if abs(float(ig[c])) >= 0.0005)
+
+        # Adds an explanation for each row to show where it was made from, describes the variant, converts the decimal value to 
+        # + __ points, like 0.234 becoming +23.4 pts
+        detail_rows += (f"<tr><td>{html.escape(g)}<br><span class='legend'>Created by: {html.escape(INPUTS.get(g, ''))}</span></td>"
+                        f"<td>{html.escape(describe(g, raw, typ, row, names))}"
+                        f"<br><span class='legend'>Split by input (points): {html.escape(split or 'every input under 0.05')}</span></td>"
+                        f"<td class='num {cls}'>{'+' if v > 0 else '-'}{abs(100 * v):.1f} pts</td></tr>")
+        
     # Flags any concerns, via the previously defined flag() function, making sure to bold the reason, like “Canonical splice site"
     kind_name = {"limit": "Known limit", "rule": "Existing rule", "caution": "Caution"}
     flag_html = "".join(f"<div class='flag'><strong>{kind_name[kind]}: {html.escape(short)}</strong>{html.escape(text)}</div>"
@@ -888,7 +941,7 @@ def render(row, ig, raw, names, ctx, warnings, truth = None, report_id = "", tod
 
    <!--Completeness axiom in words, to show how the score went from an average benign variant to its actual score-->
    <h2>Why the model says this</h2>
-   <p class="legend">Typical control = the average benign training variant of this gene and type, in this variant's own DNA window. Integrated Gradients splits the difference between it ({pct(base)}) and this variant ({pct(score)}) into one piece per reason; the pieces add up to the difference (gap {100 * gap:.2f} points). Each column is one reason in points: red columns push toward disease, blue columns toward benign.</p>
+   <p class="legend">Typical control = the average benign training variant of this gene and type, in this variant's own DNA window. Integrated Gradients splits the difference between it ({pct(base)}) and this variant ({pct(score)}) into one piece per reason. The difference between the baseline and variant is how IG can calculate attribtion scores. (gap {100 * gap:.2f} points). Red columns push toward disease, blue columns toward benign.</p>
    {reasons_svg(base, items, score)}
    <table><tr><th>Reason</th><th>What is true for this variant</th><th class="num">Effect</th></tr>{detail_rows}</table>
 

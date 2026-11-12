@@ -187,17 +187,18 @@ def hypothesis_2(v, path = os.path.join(RESULTS, "h2_results.csv")):
     print(f"Hypothesis 2 as pre-registered: {'PASSES' if passed else 'does not pass'} (p = {table.loc[0, 'p']:.2e}, needs < 0.01)")
     return table
 
-# Returns an array of the per-position DNA credit, adding up the 4 channels
+# Returns an array of the per-position DNA credit, adding up the absolute value of the 4 channels
 def position_credit(dna):
     return np.abs(np.asarray(dna)).sum(axis = 1)
 
 def localization_rate(models, df, F, typical, top_k = 5, steps = 64, batch_size = 64):
 
-    # Prepares the sequence of DNA letters and the baseline
+    # Prepares the sequence of the mutant sequence and then the reference DNA window and a feature baseline
     X, _ = train.prepare_tensors(df)
-    x_ref, f_base = explain.baselines(df, F, t ypical)
+    x_ref, f_base = explain.baselines(df, F, typical)
+    out = {}
 
-    # For each reference baseline (benign and 0)
+    # For each reference baseline (own window without the SNV, and all 0s)
     for name, x_base in [("reference", x_ref), ("zero", torch.zeros_like(X))]:
 
         # Calculates integrated gradients on the data and gets the per-position DNA credit
@@ -210,20 +211,30 @@ def localization_rate(models, df, F, typical, top_k = 5, steps = 64, batch_size 
         # Calculates the rate of variants ranking in the top 5 positions
         rate = float((rank < top_k).mean())
 
-        # Finds the percent of IG credits made up by variants near the variant's position (within 5 bases)
+        # Finds the percent of IG credits made up by bases near the variant base swap position (within 5 bases)
         near = float((credit[:, 95:106].sum(axis = 1) / np.maximum(credit.sum(axis = 1), 1e-12)).mean())
 
-        # Calculates how much attribution comes from DNA features vs the features (as a percent)
+        # Calculates how much attribution comes from the DNA branch vs the features (as a percent)
         dna_share = float((np.abs(dna.numpy()).sum(axis = (1, 2)) /
                            (np.abs(dna.numpy()).sum(axis = (1, 2)) + np.abs(feat.numpy()).sum(axis = 1))).mean())
 
-        # Returns the metrics found, adding to both "out" and a print statement.
+        # Prints and returns the metrics found
         out[name] = {"rate": rate, "chance": top_k / 201, "share_within_5": near, "dna_share_of_credit": dna_share}
         print(f"Localization, {name} baseline: variant position in the top {top_k} of 201 for {rate:.1%} of {len(df)} "
               f"variants (chance {top_k / 201:.1%}); {near:.1%} of the DNA credit is within 5 letters of it; "
               f"the DNA branch holds {dna_share:.1%} of all credit")
     return out
 
-
-
-
+# Runs the code's functions, saves the results
+def run_all(matched, models, setup):
+    v = cv_explanations(matched)
+    h2 = hypothesis_2(v)
+    typical = explain.typical_benign(setup["F_fit"], setup["fit_df"])
+    loc = localization_rate(models, setup["test_df"], setup["F_test"], typical)
+    gates_path = os.path.join(RESULTS, "ig_gates.json")
+    gates = json.load(open(gates_path)) if os.path.exists(gates_path) else {}
+    summary = {"h2_primary_p": float(h2.loc[0, "p"]), "h2_passes": bool(h2.loc[0, "p"] < 0.01),
+               "localization": loc, "gates": gates}
+    json.dump(summary, open(os.path.join(RESULTS, "validation.json"), "w"), indent = 2)
+    print("Saved results/validation.json")
+    return summary
